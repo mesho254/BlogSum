@@ -1,0 +1,121 @@
+
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+
+
+/*NAVBAR STYLES */
+/* General navbar styling */
+.navbar {
+  width: 100%;
+  background-color: #fff;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  position: fixed; 
+  z-index: 2000;
+}
+
+.navbar-container {
+  display: flex;
+  justify-content: space-between; /* Space out navbar items */
+  align-items: center;
+  padding: 1rem 2rem;
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  height: 60px;
+  width: 60px;
+  padding: 10px;
+}
+
+.heading {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-left: 1rem;
+}
+
+.menu-icon {
+  display: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.auth-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.user-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Custom navbar menu styling */
+.custom-navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 500px; 
+  z-index: 1000;
+}
+
+.register-button {
+  padding: 0.7em 2.1em;
+  background-color: #007bff;
+  border: none;
+  color: white;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+/* Responsive styles */
+@media (max-width: 768px) {
+  .menu-icon {
+    display: block; /* Display menu icon for smaller screens */
+  }
+
+  .custom-navbar {
+    display: none; /* Hide menu items on smaller screens */
+    width: 100%;
+    z-index: 1000;
+  }
+
+  .custom-navbar.open {
+    display: flex;
+    flex-direction: column;
+    position: absolute; /* Position menu absolutely */
+    top: calc(100% + 10px); /* Position menu below navbar */
+    left: 0; /* Ensure menu starts from left edge */
+    background-color: #ffffff;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    border-radius: 5px;
+    z-index: 1000; /* Ensure menu appears above other content */
+  }
+
+  .register-menu-item, .user-menu-item {
+    width: 100%;
+    text-align: center;
+  }
+
+  .register-button {
+    width: 100%;
+  }
+}
+
+.ant-card-body .anticon-share-alt:hover + .share-icons {
+  display: block !important;
+}
