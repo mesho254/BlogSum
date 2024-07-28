@@ -6,10 +6,10 @@ const bodyParser = require('body-parser');
 // const MongoStore = require('connect-mongo');
 // const cookieParser = require('cookie-parser');
 const cors = require('cors');
+const corsOptions = { origin: "*", credentials: true, optionSuccessStatus: 200 };
 
 dotenv.config();
 
-const corsOptions = { origin: "https://blog-sum.vercel.app", credentials: true, optionSuccessStatus: 200 };
 
 const authRoutes = require('./Routes/auth');
 const blogRoutes = require('./Routes/blogs');
@@ -24,16 +24,16 @@ const server = http.createServer(app);
 
 const io = require("socket.io")(server, {
   cors: {
-    origin:"https://blog-sum.vercel.app",
+    origin:"*",
     methods: ["GET", "POST"],
     allowedHeaders: ["my-custom-header"],
     credentials: true,
   }
 });
 
+app.use(express.json());
 app.use(cors(corsOptions));
 app.use(bodyParser.json());
-app.use(express.json());
 // app.use(cookieParser());
 
 // app.use(
