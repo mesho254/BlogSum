@@ -9,7 +9,7 @@ const cors = require('cors');
 
 dotenv.config();
 
-const corsOptions = { origin: "http://localhost:3000", credentials: true, optionSuccessStatus: 200 };
+const corsOptions = { origin: "*", credentials: true, optionSuccessStatus: 200 };
 
 const authRoutes = require('./Routes/auth');
 const blogRoutes = require('./Routes/blogs');

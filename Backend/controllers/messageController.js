@@ -1,12 +1,12 @@
 const Message = require('../Models/Message');
 const mongoose = require('mongoose');
-const { validationResult } = require('express-validator');
+// const { validationResult } = require('express-validator');
 
 const sendMessage = async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
+  // const errors = validationResult(req);
+  // if (!errors.isEmpty()) {
+  //   return res.status(400).json({ errors: errors.array() });
+  // }
 
   const { receiverId, message } = req.body;
 

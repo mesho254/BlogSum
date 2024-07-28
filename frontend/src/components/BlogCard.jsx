@@ -286,7 +286,7 @@ const BlogCard = ({ blog }) => {
         <div style={{ display: 'flex', alignItems: 'center', marginTop: '10px', marginBottom:"20px" }}>
         <Link to={`/profile/${blog.author._id}`}><Avatar src={blog.author.profilePicture} size="large"/></Link> 
           <div >
-          <Link to={`/profile/${blog.author._id}`}><span style={{ marginLeft: '10px', marginRight:"80px", color: '#8c8c8c' }}>{user.username === blog.author.username ? 'You' : blog.author.username}</span></Link>
+          <Link to={`/profile/${blog.author._id}`}><span style={{ marginLeft: '10px', marginRight:"80px", color: '#8c8c8c' }}>{user && user.username === blog.author.username ? 'You' : blog.author.username}</span></Link>
           {user && user._id !== blog.author._id && isFollowing ? (
             <Button style={{ marginLeft: 'auto' }} onClick={handleUnfollow} size="small">following</Button>
           ) : (

@@ -75,7 +75,7 @@ const Banner = () => {
         <div style={{ display: 'flex', alignItems: 'center' }}>
         <Link to={`/profile/${currentBlog.author._id}`}><Avatar src={currentBlog.author.profilePicture} size="large" style={{ marginRight: '10px' }} /></Link>
           <div>
-            <Text style={{ color: 'white' }}>{user.username === currentBlog.author.username ? 'You' : currentBlog.author.username}</Text>
+            <Text style={{ color: 'white' }}>{user && user.username === currentBlog.author.username ? 'You' : currentBlog.author.username}</Text>
             <br />
             <Text style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.7)' }}>
               {new Date(currentBlog.date).toLocaleDateString()} • {currentBlog.readTime} mins read
