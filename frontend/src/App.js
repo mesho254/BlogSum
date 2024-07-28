@@ -43,7 +43,7 @@ function App() {
           <Route path="/forgotPassword" element={<ForgotPassword/>}/>
           <Route path="/password-reset/:id/:token" element={<ResetPassword/>}/>
           <Route path='/profile' element={<ProtectedRoute><Profile/></ProtectedRoute>}/>
-          <Route path="/profile/:id" element={<OtherProfile />} />
+          <Route path="/profile/:id" element={<ProtectedRoute><OtherProfile /></ProtectedRoute>} />
           <Route path='/createBlog' element={<ProtectedRoute><BlogForm/></ProtectedRoute>}/>
           <Route path='/edit/:id' element={<ProtectedRoute><BlogForm /></ProtectedRoute>} /> 
           <Route path='/blog/:id' element={<BlogDetails/>}/>

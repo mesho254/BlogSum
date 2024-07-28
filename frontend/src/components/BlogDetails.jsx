@@ -150,7 +150,7 @@ const BlogDetail = () => {
         <h1 style={{ fontSize: '2em', fontWeight: 'bold', marginBottom: '10px' }}>{blog.title}</h1>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px', color: '#8c8c8c' }}>
           <Link to={`/profile/${blog.author._id}`}><Avatar src={blog.author.profilePicture} /></Link>
-          <Link to={`/profile/${blog.author._id}`}><span style={{ marginLeft: '10px' }}>{user.username === blog.author.username ? 'You' : blog.author.username}</span></Link>
+          <Link to={`/profile/${blog.author._id}`}><span style={{ marginLeft: '10px' }}>{user && user.username === blog.author.username ? 'You' : blog.author.username}</span></Link>
           <span style={{ marginLeft: '10px' }}>{moment(blog.date).format('DD MMM YYYY')}</span>
           <span style={{ marginLeft: '10px' }}><ClockCircleOutlined /> {blog.readTime} min read</span>
           <Tooltip title={speechState === 'playing' ? "Pause reading" : speechState === 'paused' ? "Resume reading" : "Read aloud"}>
