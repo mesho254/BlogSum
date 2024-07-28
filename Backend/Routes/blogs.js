@@ -19,16 +19,16 @@ const {
 
 router.route('/')
   .get(getBlogs)
-  .post( upload.single('image'), createBlog);
+  .post(protect, upload.single('image'), createBlog);
 
-router.get('/user/blogs', getUserBlogs); 
+router.get('/user/blogs', protect, getUserBlogs); 
 
-router.get('/otherBlogs/:id', getProfileUserBlogs)
+router.get('/otherBlogs/:id',protect, getProfileUserBlogs)
 
 router.route('/:id')
   .get(getBlogById)
-  .put( upload.single('image'), updateBlog)
-  .delete( deleteBlog);
+  .put(protect, upload.single('image'), updateBlog)
+  .delete(protect, deleteBlog);
 
 router.route('/:id/like').put(protect, likeBlog);
 router.route('/:id/bookmark').put(protect, bookmarkBlog);
