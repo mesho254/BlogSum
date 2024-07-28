@@ -20,14 +20,14 @@ const app = express();
 // const server = http.createServer(app);
 
 dotenv.config();
-const io = require("socket.io")(server, {
-  cors: {
-    origin:"*",
-    methods: ["GET", "POST"],
-    allowedHeaders: ["my-custom-header"],
-    credentials: true,
-  }
-});
+// const io = require("socket.io")(server, {
+//   cors: {
+//     origin:"*",
+//     methods: ["GET", "POST"],
+//     allowedHeaders: ["my-custom-header"],
+//     credentials: true,
+//   }
+// });
 
 app.use(express.json());
 app.use(cors(corsOptions));
@@ -53,18 +53,18 @@ app.use(bodyParser.json());
 // );
 
 // Socket.IO connection handling
-io.on('connection', (socket) => {
-  console.log('New client connected');
+// io.on('connection', (socket) => {
+//   console.log('New client connected');
 
-  // Join a room based on user ID
-  socket.on('join', (_id) => {
-    socket.join(_id.toString());
-  });
+//   // Join a room based on user ID
+//   socket.on('join', (_id) => {
+//     socket.join(_id.toString());
+//   });
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected');
-  });
-});
+//   socket.on('disconnect', () => {
+//     console.log('Client disconnected');
+//   });
+// });
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
@@ -72,8 +72,8 @@ mongoose.connect(process.env.MONGO_URI, {
 })
   .then(() => {
     console.log('MongoDB connected');
-    // Attach io instance to app for use in routes
-    app.io = io;
+    // // Attach io instance to app for use in routes
+    // app.io = io;
   })
   .catch(err => console.error(err));
 
