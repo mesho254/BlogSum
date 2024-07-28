@@ -9,7 +9,7 @@ const cors = require('cors');
 
 dotenv.config();
 
-const corsOptions = { origin: ["http://localhost:3000", "https://blog-sum.vercel.app"], credentials: true, optionSuccessStatus: 200 };
+const corsOptions = { origin: "*", credentials: true, optionSuccessStatus: 200 };
 
 const authRoutes = require('./Routes/auth');
 const blogRoutes = require('./Routes/blogs');
@@ -24,7 +24,7 @@ const server = http.createServer(app);
 
 const io = require("socket.io")(server, {
   cors: {
-    origin: ["http://localhost:3000", "https://blog-sum.vercel.app"],
+    origin:"*",
     methods: ["GET", "POST"],
     allowedHeaders: ["my-custom-header"],
     credentials: true,
