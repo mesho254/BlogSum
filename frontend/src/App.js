@@ -32,6 +32,8 @@ const Faqs = lazy(() => import('./pages/Faqs'))
 const ReturnPolicy = lazy(() => import('./pages/ReturnPolicy'))
 const TermsAndConditions = lazy(() => import('./pages/TermsOfService'))
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'))
+const Help = lazy(() => import('./pages/Help'));
+const Settings = lazy(() => import('./pages/Settings'));
 
 
 
@@ -68,6 +70,8 @@ function App() {
                   <Route path='/return' element={<ReturnPolicy/>}/>
                   <Route path='/terms-of-service' element={<TermsAndConditions/>}/>
                   <Route path='/privacypolicy' element={<PrivacyPolicy/>}/>
+                  <Route path='/help' element={<Help/>}/>
+                  <Route path='/settings' element={<ProtectedRoute><Settings/></ProtectedRoute>}/>
 
 
 
