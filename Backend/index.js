@@ -13,7 +13,7 @@ const messageRoutes = require('./Routes/messages');
 const channelRoutes = require('./Routes/channels');
 const subscribeRoutes = require('./Routes/subscribe')
 const cors = require('cors');
-const corsOptions = { origin: "*", credentials: true, optionSuccessStatus: 200 };
+const corsOptions = { origin: "https://blog-sum.vercel.app/", credentials: true, optionSuccessStatus: 200 };
 
 const http = require('http');
 const app = express();

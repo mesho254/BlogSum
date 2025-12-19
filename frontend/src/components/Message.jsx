@@ -60,7 +60,7 @@ const Message = () => {
 
   useEffect(() => {
     if (user && user.token) {
-      const newSocket = io(process.env.REACT_APP_API_URL || 'http://localhost:5000', {
+      const newSocket = io(process.env.REACT_APP_API_URL || 'https://blogsum123.onrender.com', {
         withCredentials: true,
         extraHeaders: {
           "my-custom-header": "abcd"
