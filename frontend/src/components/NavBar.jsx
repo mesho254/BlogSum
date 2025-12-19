@@ -1,21 +1,19 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Button, Menu, Dropdown, Avatar, Badge, List, notification as antNotification, Tooltip, message } from 'antd';
-import { HomeOutlined, UserOutlined, MenuOutlined, LogoutOutlined, BellOutlined, MessageOutlined, CloseOutlined, CheckOutlined  } from '@ant-design/icons';
+import { HomeOutlined, UserOutlined, MenuOutlined, LogoutOutlined, BellOutlined, MessageOutlined, CloseOutlined, CheckOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../axiosConfig';
 import Logo from '../assets/logo.png';
 import useAuth from '../hooks/useAuth';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const Navbar = () => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [notifications, setNotifications] = useState([]);
-  const [notificationCount, setNotificationCount] = useState(0);
-  const [messageCount, setMessageCount] = useState(0); // Initialize message count
-  const [userProfile, setUserProfile] = useState({profilePicture: ''})
   const menuRef = useRef(null);
   const navigate = useNavigate();
   const { logout, user } = useAuth();
+  const queryClient = useQueryClient();
 
   const handleMenuToggle = () => {
     setMenuOpen(prevMenuOpen => !prevMenuOpen);
@@ -25,86 +23,72 @@ const Navbar = () => {
     setIsMobile(window.innerWidth <= 768);
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     updateMobileView();
     window.addEventListener('resize', updateMobileView);
     return () => window.removeEventListener('resize', updateMobileView);
   }, [updateMobileView]);
 
-  useEffect(() => {
-
-    if (user) {
-    const fetchUserProfile = async () => {
-      try {
-        const response = await axiosInstance.get('/api/users/profile');
-        setUserProfile(response.data);
-      } catch (error) {
-        message('Error fetching user profile');
-      }
-    }
-  
-
-    fetchUserProfile();
-  }
-  }, [user]);
-
-  useEffect(() => {
+  React.useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
         setMenuOpen(false);
       }
     };
-
     if (menuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     } else {
       document.removeEventListener('mousedown', handleClickOutside);
     }
-
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [menuOpen]);
 
-  useEffect(() => {
-    const fetchNotifications = async () => {
-      if (user) {
-        try {
-          const { data } = await axiosInstance.get('/api/notifications', {
-            headers: {
-              Authorization: `Bearer ${user.token}`
-            }
-          });
-          setNotifications(data);
-          setNotificationCount(data.filter(notification => !notification.read).length);
-        } catch (error) {
-          console.error('Error fetching notifications:', error);
+  const { data: profileData } = useQuery({
+    queryKey: ['userProfile'],
+    queryFn: async () => {
+      const response = await axiosInstance.get('/api/users/profile');
+      return response.data;
+    },
+    enabled: !!user,
+    onError: () => message.error('Error fetching user profile'),
+  });
+
+  const userProfile = profileData ?? { profilePicture: '' };
+
+  const { data: notificationsData } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/api/notifications', {
+        headers: {
+          Authorization: `Bearer ${user.token}`
         }
-      }
-    };
+      });
+      return data;
+    },
+    enabled: !!user,
+    onError: (error) => console.error('Error fetching notifications:', error),
+  });
 
-    fetchNotifications();
-  }, [user]);
+  const notifications = notificationsData ?? [];
+  const notificationCount = notifications.filter(notification => !notification.read).length;
 
-  useEffect(() => {
-    const fetchUnreadMessagesCount = async () => {
-      if (user) {
-        try {
-          const { data } = await axiosInstance.get('/api/users/messages', {
-            headers: {
-              Authorization: `Bearer ${user.token}`
-            }
-          });
-          const unreadCount = data.filter(message => message.read === false).length;
-          setMessageCount(unreadCount);
-        } catch (error) {
-          console.error('Error fetching unread messages count:', error);
+  const { data: unreadMessageCount } = useQuery({
+    queryKey: ['unreadMessages'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/api/users/messages', {
+        headers: {
+          Authorization: `Bearer ${user.token}`
         }
-      }
-    };
+      });
+      return data.filter(message => message.read === false).length;
+    },
+    enabled: !!user,
+    onError: (error) => console.error('Error fetching unread messages count:', error),
+  });
 
-    fetchUnreadMessagesCount();
-  }, [user]);
+  const messageCount = unreadMessageCount ?? 0;
 
   const handleMarkAsRead = async (id) => {
     try {
@@ -113,12 +97,11 @@ const Navbar = () => {
           Authorization: `Bearer ${user.token}`
         }
       });
-      setNotifications((prevNotifications) =>
-        prevNotifications.map((notification) =>
+      queryClient.setQueryData(['notifications'], (old) =>
+        old ? old.map(notification =>
           notification._id === id ? { ...notification, read: true } : notification
-        )
+        ) : []
       );
-      setNotificationCount((prevCount) => prevCount - 1);
       antNotification.success({ message: 'Notification marked as read' });
     } catch (error) {
       console.error('Error marking notification as read:', error);
@@ -132,12 +115,11 @@ const Navbar = () => {
           Authorization: `Bearer ${user.token}`
         }
       });
-      setNotifications((prevNotifications) =>
-        prevNotifications.map((notification) =>
+      queryClient.setQueryData(['notifications'], (old) =>
+        old ? old.map(notification =>
           notification._id === id ? { ...notification, read: false } : notification
-        )
+        ) : []
       );
-      setNotificationCount((prevCount) => prevCount + 1);
       antNotification.success({ message: 'Notification marked as unread' });
     } catch (error) {
       console.error('Error marking notification as unread:', error);
@@ -151,10 +133,9 @@ const Navbar = () => {
           Authorization: `Bearer ${user.token}`
         }
       });
-      setNotifications((prevNotifications) =>
-        prevNotifications.map((notification) => ({ ...notification, read: true }))
+      queryClient.setQueryData(['notifications'], (old) =>
+        old ? old.map(notification => ({ ...notification, read: true })) : []
       );
-      setNotificationCount(0);
       antNotification.success({ message: 'All notifications marked as read' });
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
@@ -217,7 +198,6 @@ const Navbar = () => {
       <Menu.Item key="help" onClick={NavHelp}>
         <span>Help</span>
       </Menu.Item>
-      
       <Menu.Item key="logout" onClick={handleLogout}>
         <LogoutOutlined />
         <span>Logout</span>
@@ -236,15 +216,15 @@ const Navbar = () => {
         Mark All as Read
       </Button>
       <List
-       style={{padding:"8px"}}
+        style={{padding:"8px"}}
         itemLayout="horizontal"
         dataSource={notifications}
         renderItem={item => (
           <List.Item
             actions={[
-              item.read 
-                ? <Tooltip title="Mark as read"><CloseOutlined key="mark-as-unread" onClick={() => handleMarkAsUnread(item._id)} /></Tooltip>
-                : <Tooltip title="Mark as Unread"><CheckOutlined key="mark-as-read" onClick={() => handleMarkAsRead(item._id)} /></Tooltip>
+              item.read
+                ? <Tooltip title="Mark as unread"><CloseOutlined key="mark-as-unread" onClick={() => handleMarkAsUnread(item._id)} /></Tooltip>
+                : <Tooltip title="Mark as read"><CheckOutlined key="mark-as-read" onClick={() => handleMarkAsRead(item._id)} /></Tooltip>
             ]}
           >
             <List.Item.Meta
@@ -290,9 +270,7 @@ const Navbar = () => {
                 <Dropdown overlay={userMenu} trigger={['click']}>
                   <div style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
                     <span style={{ marginRight: '10px' }}>{user.username}</span>
-                    <Avatar size="medium" style={{ backgroundColor: '#87d068' }} src= {userProfile.profilePicture} />
-                     
-          
+                    <Avatar size="medium" style={{ backgroundColor: '#87d068' }} src={userProfile.profilePicture} />
                   </div>
                 </Dropdown>
               </Menu.Item>
