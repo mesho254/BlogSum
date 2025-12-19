@@ -14,7 +14,7 @@ const { Text, Link } = Typography;
 
 function CustomFooter() {
   return (
-    <Footer style={{ backgroundColor: '#000', color: '#fff', padding: '20px 20px', borderRadius:"10px", margin:"10px 10px", bottom:0 }}>
+    <Footer style={{ backgroundColor: '#000', color: '#fff', padding: '20px 20px', borderRadius:"10px", margin:"10px 10px" }}>
       <Row justify="space-between" gutter={[16, 16]}>
         <Col xs={24} sm={24} md={8} lg={8}>
           <div style={{ marginBottom: '20px' }}>
@@ -27,16 +27,16 @@ function CustomFooter() {
         <Col xs={24} sm={12} md={4} lg={4}>
           <Text strong style={{ color: '#fff' }}>About</Text>
           <div>
-            <Link href="/about-us" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>About Us</Link>
-            <Link href="/blog" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>Blog</Link>
-            <Link href="/career" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>Career</Link>
+            <Link href="/about" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>About Us</Link>
+            <Link href="/" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>Blog</Link>
+            <Link href="/careers" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>Career</Link>
           </div>
         </Col>
         <Col xs={24} sm={12} md={4} lg={4}>
           <Text strong style={{ color: '#fff' }}>Support</Text>
           <div>
-            <Link href="/contact-us" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>Contact Us</Link>
-            <Link href="/return" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>Return</Link>
+            <Link href="/contactus" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>Contact Us</Link>
+            <Link href="/doc" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>Doc</Link>
             <Link href="/faq" style={{ color: '#fff', display: 'block', marginTop: '10px' }}>FAQ</Link>
           </div>
         </Col>
@@ -60,7 +60,7 @@ function CustomFooter() {
           <Text style={{ color: '#fff' }}>© 2024 BlogSum. All rights reserved.</Text>
         </Col>
         <Col>
-          <Link href="/privacy-policy" style={{ color: '#fff', marginRight: '20px' }}>Privacy Policy</Link>
+          <Link href="/privacypolicy" style={{ color: '#fff', marginRight: '20px' }}>Privacy Policy</Link>
           <Link href="/terms-of-service" style={{ color: '#fff' }}>Terms of Service</Link>
         </Col>
       </Row>

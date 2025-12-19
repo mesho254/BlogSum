@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import axiosInstance from '../axiosConfig'; // Ensure axiosInstance includes auth headers
 import BlogCard from '../components/BlogCard';
 import { List, Skeleton, Alert, Tabs, Avatar, Button, message, Upload, Modal, Form, Input, Tooltip, Card, notification } from 'antd';
@@ -6,91 +6,77 @@ import { UploadOutlined, EditOutlined, LockOutlined, EnvironmentOutlined, Delete
 import Navbar from '../components/NavBar';
 import useAuth from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 
 const { TabPane } = Tabs;
 
 function Profile() {
-  const [postedBlogs, setPostedBlogs] = useState([]);
-  const [bookmarkedBlogs, setBookmarkedBlogs] = useState([]);
-  const [likedBlogs, setLikedBlogs] = useState([])
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
   const [avatarModalVisible, setAvatarModalVisible] = useState(false);
-  const [profileData, setProfileData] = useState({
-    email:"",
-    username: '',
-    location: '',
-    profilePicture: '',
-    followers: 0,
-    following: 0,
-    likedBlogs: 0
-  });
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate()
 
   const { email } = useAuth()
 
-  useEffect(() => {
-    const fetchPostedBlogs = async () => {
-      try {
-        const response = await axiosInstance.get('/api/blogs/user/blogs');
-        setPostedBlogs(response.data);
-        setLoading(false);
-      } catch (error) {
-        setError('Error fetching posted blogs');
-        setLoading(false);
-      }
-    };
+  const postedQuery = useQuery({
+    queryKey: ['postedBlogs'],
+    queryFn: async () => (await axiosInstance.get('/api/blogs/user/blogs')).data
+  });
 
-    const fetchBookmarkedBlogs = async () => {
-      try {
-        const response = await axiosInstance.get('/api/users/bookmarked-blogs');
-        setBookmarkedBlogs(response.data);
-      } catch (error) {
-        setError('Error fetching bookmarked blogs');
-      }
-    };
+  const bookmarkedQuery = useQuery({
+    queryKey: ['bookmarkedBlogs'],
+    queryFn: async () => (await axiosInstance.get('/api/users/bookmarked-blogs')).data
+  });
 
-    const fetchLikedBlogs = async () => {
-      try {
-        const response = await axiosInstance.get('/api/users/liked-blogs');
-        setLikedBlogs(response.data);
-      } catch (error) {
-        setError('Error fetching bookmarked blogs');
-      }
-    };
+  const likedQuery = useQuery({
+    queryKey: ['likedBlogs'],
+    queryFn: async () => (await axiosInstance.get('/api/users/liked-blogs')).data
+  });
 
-    const fetchUserProfile = async () => {
-      try {
-        const response = await axiosInstance.get('/api/users/profile');
-        setProfileData(response.data);
-      } catch (error) {
-        setError('Error fetching user profile');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const profileQuery = useQuery({
+    queryKey: ['userProfile'],
+    queryFn: async () => (await axiosInstance.get('/api/users/profile')).data
+  });
 
-    fetchPostedBlogs();
-    fetchBookmarkedBlogs();
-    fetchLikedBlogs();
-    fetchUserProfile();
-  }, []);
+  if (postedQuery.isLoading || bookmarkedQuery.isLoading || likedQuery.isLoading || profileQuery.isLoading) {
+    return (
+      <div style={{ padding: '20px', margin: '100px auto', width: '100%' }}>
+        <Skeleton active avatar paragraph={{ rows: 4 }} />
+      </div>
+    );
+  }
+
+  if (postedQuery.error || bookmarkedQuery.error || likedQuery.error || profileQuery.error) {
+    return <Alert message="Error" description="Error fetching data" type="error" showIcon />;
+  }
+
+  const postedBlogs = postedQuery.data || [];
+  const bookmarkedBlogs = bookmarkedQuery.data || [];
+  const likedBlogs = likedQuery.data || [];
+  const profileData = profileQuery.data || {
+    email: "",
+    username: '',
+    location: '',
+    profilePicture: '',
+    followers: [],
+    following: [],
+    likedBlogs: []
+  };
 
   const handleEditProfile = async (values) => {
-    setLoading(true)
+    setLoading(true);
     try {
       const response = await axiosInstance.put('/api/users/profile', values);
-      setProfileData(response.data);
+      profileQuery.refetch();
       setProfileModalVisible(false);
-      setLoading(false)
+      setLoading(false);
       message.success('Profile updated successfully');
     } catch (error) {
       message.error('Error updating profile');
-      setLoading(false)
+      setLoading(false);
     }
   };
 
@@ -125,16 +111,13 @@ function Profile() {
     formData.append('profilePicture', selectedFile);
 
     try {
-      const response = await axiosInstance.put('/api/users/profile', formData, {
+      await axiosInstance.put('/api/users/profile', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           authorization: 'Bearer ' + localStorage.getItem('token'),
         },
       });
-      setProfileData((prevData) => ({
-        ...prevData,
-        profilePicture: response.data.profilePicture, // Ensure the response contains the updated profilePicture URL
-      }));
+      profileQuery.refetch();
       message.success('Profile picture uploaded successfully');
       setAvatarModalVisible(false); // Close the modal after upload
       setPreviewImage(null); // Clear the preview image
@@ -146,10 +129,7 @@ function Profile() {
   const handleDeleteAvatar = async () => {
     try {
       await axiosInstance.delete('/api/users/profile/avatar');
-      setProfileData((prevData) => ({
-        ...prevData,
-        profilePicture: '', // Clear the profile picture
-      }));
+      profileQuery.refetch();
       message.success('Profile picture deleted successfully');
       setAvatarModalVisible(false); // Close the modal after delete
       setPreviewImage(null); // Clear the preview image
@@ -157,16 +137,6 @@ function Profile() {
       message.error('Error deleting profile picture');
     }
   };
-
-  if (loading) {
-    <div style={{ padding: '20px', margin: '100px auto', width: '100%' }}>
-    <Skeleton active avatar paragraph={{ rows: 4 }} />
-  </div>
-  }
-
-  if (error) {
-    return <Alert message="Error" description={error} type="error" showIcon />;
-  }
 
   const NavNew = () => {
     navigate('/createBlog')

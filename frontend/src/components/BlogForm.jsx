@@ -114,8 +114,8 @@ const BlogForm = () => {
       justifyContent: 'center',
       alignItems: 'center',
       minHeight: '100vh',
-      marginBottom:"300px", 
-      marginTop:"360px" 
+      marginBottom:"0px", 
+      marginTop:"100px" 
     }}>
       <Card style={{ width: '80%', padding: '20px'}}>
        <h1 style={{textAlign:"center"}}>{id ? 'Edit Blog' : 'Create New Blog'}</h1>

@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 const axiosInstance = axios.create({
-  baseURL: 'https://blog-sum-rna1.vercel.app/',
+  // baseURL: 'https://blog-sum-rna1.vercel.app/',
+  baseURL: 'http://localhost:5000',
 });
 
 axiosInstance.interceptors.request.use((config) => {

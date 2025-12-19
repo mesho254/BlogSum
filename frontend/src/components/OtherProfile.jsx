@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Avatar, Card, Tabs, List, message, Button, Skeleton } from 'antd';
 import { EnvironmentOutlined, StopOutlined } from '@ant-design/icons';
@@ -6,117 +6,128 @@ import axiosInstance from '../axiosConfig';
 import BlogCard from './BlogCard';
 import Navbar from './NavBar';
 import useAuth from '../hooks/useAuth';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 const { TabPane } = Tabs;
 
 const OtherProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState(null);
-  const [Blogs, setBlogs] = useState([]);
-  const [likedBlogs, setLikedBlogs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [blocked, setBlocked] = useState(false);
-
+  const queryClient = useQueryClient();
   const { user } = useAuth();
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const response = await axiosInstance.get(`/api/users/${id}`);
-        setProfile(response.data);
-        setLoading(false);
+  // Fetch user profile
+  const profileQuery = useQuery({
+    queryKey: ['otherProfile', id],
+    queryFn: async () => {
+      const response = await axiosInstance.get(`/api/users/${id}`);
+      const profileData = response.data;
 
-        // Redirect to 'profile' if the logged-in user is the author
-        if (response.data._id === user._id) {
-          navigate('/profile');
-        }
-      } catch (error) {
-        console.error('Error fetching profile:', error);
-        setLoading(false);
+      // If viewing own profile, redirect to /profile
+      if (profileData._id === user?._id) {
+        navigate('/profile', { replace: true });
       }
-    };
 
-    const fetchBlogs = async () => {
-      try {
-        const response = await axiosInstance.get(`/api/blogs/otherBlogs/${id}`);
-        setBlogs(response.data);
-        setLoading(false);
-      } catch (error) {
-        console.error('Error fetching profile:', error);
-        setLoading(false);
-      }
-    };
+      return profileData;
+    },
+    enabled: !!user?._id, // Wait until user is loaded
+  });
 
-    const fetchLikedBlogs = async () => {
-      try {
-        const response = await axiosInstance.get(`/api/users/otherLiked/${id}`);
-        setLikedBlogs(response.data);
-      } catch (error) {
-        message('Error fetching bookmarked blogs');
-      }
-    };
+  // Fetch user's blogs
+  const blogsQuery = useQuery({
+    queryKey: ['otherBlogs', id],
+    queryFn: () => axiosInstance.get(`/api/blogs/otherBlogs/${id}`).then(res => res.data),
+  });
 
-    const fetchBlockStatus = async () => {
-      try {
-        const response = await axiosInstance.get(`/api/users/${id}/blockStatus`, {
-          headers: {
-            Authorization: `Bearer ${user.token}`
-          }
-        });
-        setBlocked(response.data.isBlocked);
-      } catch (error) {
-        console.error('Error fetching block status:', error);
-      }
-    };
+  // Fetch user's liked blogs
+  const likedBlogsQuery = useQuery({
+    queryKey: ['otherLikedBlogs', id],
+    queryFn: () => axiosInstance.get(`/api/users/otherLiked/${id}`).then(res => res.data),
+  });
 
-    fetchProfile();
-    fetchBlogs();
-    fetchLikedBlogs();
-    fetchBlockStatus();
-  }, [id, user._id, user.token, navigate]);
+  // Fetch block status
+  const blockStatusQuery = useQuery({
+    queryKey: ['blockStatus', id],
+    queryFn: () =>
+      axiosInstance
+        .get(`/api/users/${id}/blockStatus`, {
+          headers: { Authorization: `Bearer ${user?.token}` },
+        })
+        .then(res => res.data.isBlocked),
+    enabled: !!user?.token,
+  });
 
-  const handleBlock = async () => {
-    try {
-      await axiosInstance.put(`/api/users/${id}/block`, null, {
-        headers: {
-          Authorization: `Bearer ${user.token}`
-        }
-      });
-      setBlocked(true);
-      message.success('Successfully Blocked');
-    } catch (error) {
-      console.error('Error blocking the user', error);
-      message.error('Error blocking the user');
-    }
-  };
+  // Mutation: Block user
+  const blockMutation = useMutation({
+    mutationFn: () =>
+      axiosInstance.put(
+        `/api/users/${id}/block`,
+        null,
+        { headers: { Authorization: `Bearer ${user?.token}` } }
+      ),
+    onSuccess: () => {
+      queryClient.setQueryData(['blockStatus', id], true);
+      message.success('User blocked successfully');
+    },
+    onError: () => message.error('Failed to block user'),
+  });
 
-  const handleUnBlock = async () => {
-    try {
-      await axiosInstance.put(`/api/users/${id}/unblock`, null, {
-        headers: {
-          Authorization: `Bearer ${user.token}`
-        }
-      });
-      setBlocked(false);
-      message.success('Successfully Unblocked');
-    } catch (error) {
-      console.error('Error Unblocking the user', error);
-      message.error('Error Unblocking the user');
-    }
-  };
+  // Mutation: Unblock user
+  const unblockMutation = useMutation({
+    mutationFn: () =>
+      axiosInstance.put(
+        `/api/users/${id}/unblock`,
+        null,
+        { headers: { Authorization: `Bearer ${user?.token}` } }
+      ),
+    onSuccess: () => {
+      queryClient.setQueryData(['blockStatus', id], false);
+      message.success('User unblocked successfully');
+    },
+    onError: () => message.error('Failed to unblock user'),
+  });
 
-  if (loading) {
+  const handleBlock = () => blockMutation.mutate();
+  const handleUnblock = () => unblockMutation.mutate();
+
+  const isLoading =
+    profileQuery.isLoading ||
+    blogsQuery.isLoading ||
+    likedBlogsQuery.isLoading ||
+    blockStatusQuery.isLoading;
+
+  const isError =
+    profileQuery.isError ||
+    blogsQuery.isError ||
+    likedBlogsQuery.isError ||
+    blockStatusQuery.isError;
+
+  if (isLoading) {
     return (
-      <div style={{ padding: '20px', margin: '100px auto', width: '100%' }}>
-        <Skeleton active avatar paragraph={{ rows: 4 }} />
-      </div>
+      <>
+        <Navbar />
+        <div style={{ padding: '20px', margin: '100px auto', width: '100%' }}>
+          <Skeleton active avatar paragraph={{ rows: 6 }} />
+        </div>
+      </>
     );
   }
 
-  if (!profile) {
-    return <div>Error loading profile</div>;
+  if (isError || !profileQuery.data) {
+    return (
+      <>
+        <Navbar />
+        <div style={{ padding: '20px', textAlign: 'center', marginTop: '100px' }}>
+          <p>Error loading profile. Please try again later.</p>
+        </div>
+      </>
+    );
   }
+
+  const profile = profileQuery.data;
+  const Blogs = blogsQuery.data || [];
+  const likedBlogs = likedBlogsQuery.data || [];
+  const blocked = blockStatusQuery.data || false;
 
   return (
     <>
@@ -128,81 +139,141 @@ const OtherProfile = () => {
             <div style={{ marginLeft: '20px' }}>
               <h2>{profile.username}</h2>
               <p>{profile.email}</p>
-              <p><EnvironmentOutlined /> {profile.location}</p>
+              <p>
+                <EnvironmentOutlined /> {profile.location || 'No location set'}
+              </p>
             </div>
             <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-              <div style={{ textAlign: 'center', margin: '0 10px', border: '1px purple solid', padding: '10px', borderRadius: '20px' }}>
+              <div
+                style={{
+                  textAlign: 'center',
+                  margin: '0 10px',
+                  border: '1px purple solid',
+                  padding: '10px',
+                  borderRadius: '20px',
+                }}
+              >
                 <p>Followers</p>
-                <p style={{ fontSize: '20px', fontWeight: 'bold', minWidth: '70px' }}>{profile.followers.length}</p>
+                <p style={{ fontSize: '20px', fontWeight: 'bold', minWidth: '70px' }}>
+                  {profile.followers?.length || 0}
+                </p>
               </div>
-              <div style={{ textAlign: 'center', margin: '0 10px', border: '1px purple solid', padding: '10px', borderRadius: '20px' }}>
+              <div
+                style={{
+                  textAlign: 'center',
+                  margin: '0 10px',
+                  border: '1px purple solid',
+                  padding: '10px',
+                  borderRadius: '20px',
+                }}
+              >
                 <p>Following</p>
-                <p style={{ fontSize: '20px', fontWeight: 'bold', minWidth: '70px' }}>{profile.following.length}</p>
+                <p style={{ fontSize: '20px', fontWeight: 'bold', minWidth: '70px' }}>
+                  {profile.following?.length || 0}
+                </p>
               </div>
-              <div style={{ textAlign: 'center', margin: '0 10px', border: '1px purple solid', padding: '10px', borderRadius: '20px' }}>
+              <div
+                style={{
+                  textAlign: 'center',
+                  margin: '0 10px',
+                  border: '1px purple solid',
+                  padding: '10px',
+                  borderRadius: '20px',
+                }}
+              >
                 <p>Likes</p>
-                <p style={{ fontSize: '20px', fontWeight: 'bold', minWidth: '70px' }}>{profile.likedBlogs.length}</p>
+                <p style={{ fontSize: '20px', fontWeight: 'bold', minWidth: '70px' }}>
+                  {profile.likedBlogs?.length || 0}
+                </p>
               </div>
             </div>
             <div>
               {blocked ? (
-                <Button style={{ marginLeft: 'auto' }} onClick={handleUnBlock}>Unblock User</Button>
+                <Button onClick={handleUnblock} loading={unblockMutation.isPending}>
+                  Unblock User
+                </Button>
               ) : (
-                <Button icon={<StopOutlined />} style={{ marginLeft: 'auto' }} onClick={handleBlock}>Block User</Button>
+                <Button
+                  icon={<StopOutlined />}
+                  onClick={handleBlock}
+                  loading={blockMutation.isPending}
+                >
+                  Block User
+                </Button>
               )}
             </div>
           </div>
         </Card>
+
         <Tabs defaultActiveKey="1" style={{ marginTop: 20 }}>
           <TabPane tab="Posts" key="1">
-            <List
-              grid={{ gutter: 16, xs: 1, sm: 2, md: 3 }}
-              dataSource={Blogs}
-              renderItem={(blog) => (
-                <List.Item>
-                  <BlogCard blog={blog} />
-                </List.Item>
-              )}
-            />
+            {Blogs.length === 0 ? (
+              <p style={{ textAlign: 'center', padding: '40px' }}>No posts yet.</p>
+            ) : (
+              <List
+                grid={{ gutter: 16, xs: 1, sm: 2, md: 3 }}
+                dataSource={Blogs}
+                renderItem={(blog) => (
+                  <List.Item>
+                    <BlogCard blog={blog} />
+                  </List.Item>
+                )}
+              />
+            )}
           </TabPane>
+
           <TabPane tab="Liked Blogs" key="2">
-            <List
-              grid={{ gutter: 16, xs: 1, sm: 2, md: 3 }}
-              dataSource={likedBlogs}
-              renderItem={(blog) => (
-                <List.Item>
-                  <BlogCard blog={blog} />
-                </List.Item>
-              )}
-            />
+            {likedBlogs.length === 0 ? (
+              <p style={{ textAlign: 'center', padding: '40px' }}>No liked blogs.</p>
+            ) : (
+              <List
+                grid={{ gutter: 16, xs: 1, sm: 2, md: 3 }}
+                dataSource={likedBlogs}
+                renderItem={(blog) => (
+                  <List.Item>
+                    <BlogCard blog={blog} />
+                  </List.Item>
+                )}
+              />
+            )}
           </TabPane>
+
           <TabPane tab="Following" key="3">
-            <List
-              style={{ margin: '20px 10px' }}
-              dataSource={profile.following}
-              renderItem={(followed) => (
-                <List.Item>
-                  <List.Item.Meta
-                    avatar={<Avatar src={followed.profilePicture} />}
-                    title={followed.username}
-                  />
-                </List.Item>
-              )}
-            />
+            {profile.following?.length === 0 ? (
+              <p style={{ textAlign: 'center', padding: '40px' }}>Not following anyone.</p>
+            ) : (
+              <List
+                style={{ margin: '20px 10px' }}
+                dataSource={profile.following}
+                renderItem={(followed) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      avatar={<Avatar src={followed.profilePicture} />}
+                      title={followed.username}
+                    />
+                  </List.Item>
+                )}
+              />
+            )}
           </TabPane>
+
           <TabPane tab="Followers" key="4">
-            <List
-              style={{ margin: '20px 10px' }}
-              dataSource={profile.followers}
-              renderItem={(follower) => (
-                <List.Item>
-                  <List.Item.Meta
-                    avatar={<Avatar src={follower.profilePicture} />}
-                    title={follower.username}
-                  />
-                </List.Item>
-              )}
-            />
+            {profile.followers?.length === 0 ? (
+              <p style={{ textAlign: 'center', padding: '40px' }}>No followers yet.</p>
+            ) : (
+              <List
+                style={{ margin: '20px 10px' }}
+                dataSource={profile.followers}
+                renderItem={(follower) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      avatar={<Avatar src={follower.profilePicture} />}
+                      title={follower.username}
+                    />
+                  </List.Item>
+                )}
+              />
+            )}
           </TabPane>
         </Tabs>
       </div>
