@@ -13,7 +13,7 @@ const messageRoutes = require('./Routes/messages');
 const channelRoutes = require('./Routes/channels');
 const subscribeRoutes = require('./Routes/subscribe')
 const cors = require('cors');
-const corsOptions = { origin: "https://blog-sum.vercel.app/", credentials: true, optionSuccessStatus: 200 };
+const corsOptions = { origin: "*", credentials: true, optionSuccessStatus: 200 };
 
 const http = require('http');
 const app = express();
@@ -23,7 +23,7 @@ dotenv.config();
 const { Server } = require("socket.io");
 const io = new Server(server, {
   cors: {
-    origin: "https://blog-sum.vercel.app/",
+    origin: "*",
     methods: ["GET", "POST"],
     allowedHeaders: ["my-custom-header"],
     credentials: true,
