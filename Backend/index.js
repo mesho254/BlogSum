@@ -23,7 +23,7 @@ dotenv.config();
 const { Server } = require("socket.io");
 const io = new Server(server, {
   cors: {
-    origin: ["https://blog-sum.vercel.app", "http://localhost:5000"]
+    origin: ["https://blog-sum.vercel.app", "http://localhost:3000"],
     methods: ["GET", "POST"],
     allowedHeaders: ["my-custom-header"],
     credentials: true,
