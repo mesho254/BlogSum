@@ -25,8 +25,13 @@ const AuthProvider = ({ children }) => {
     setUser(data);
   };
 
-  const logout = () => {
-    localStorage.removeItem('userInfo');
+ const logout = async () => {
+    try {
+      await axiosInstance.post('/api/auth/logout');  // Clears cookie on backend
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+    localStorage.removeItem('userInfo');  // Clears localStorage
     setUser(null);
   };
 

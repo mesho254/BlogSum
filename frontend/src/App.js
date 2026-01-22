@@ -18,7 +18,7 @@ const BlogDetails = lazy(()=> import('./components/BlogDetails'))
 const Profile = lazy(()=> import('./pages/Profile'))
 const OtherProfile = lazy(()=> import('./components/OtherProfile'))
 const Notification = lazy(()=> import('./components/Notification'))
-const Message = lazy(()=> import('./components/Message'))
+const Message = lazy(()=> import('./components/Message/Message'))
 const ForgotPassword = lazy(()=> import('./components/ForgotPassword'))
 const ResetPassword = lazy(()=> import('./components/ResetPassword'))
 

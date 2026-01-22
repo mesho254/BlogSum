@@ -12,27 +12,30 @@ dotenv.config()
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: '30d',
+    expiresIn: '1d',  // Changed to 24 hours
   });
 };
 
 const registerUser = async (req, res) => {
   const { username, email, password } = req.body;
-
   const userExists = await User.findOne({ email });
-
   if (userExists) {
     return res.status(400).json({ message: 'User already exists' });
   }
-
   const user = await User.create({ username, email, password });
-
   if (user) {
+    const token = generateToken(user._id);
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',  // Secure in production
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000  // 24 hours
+    });
     res.status(201).json({
       _id: user._id,
       username: user.username,
       email: user.email,
-      token: generateToken(user._id),
+      token,  // Still send in JSON for localStorage
     });
   } else {
     res.status(400).json({ message: 'Invalid user data' });
@@ -41,15 +44,20 @@ const registerUser = async (req, res) => {
 
 const authUser = async (req, res) => {
   const { email, password } = req.body;
-
   const user = await User.findOne({ email });
-
   if (user && (await user.matchPassword(password))) {
+    const token = generateToken(user._id);
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000
+    });
     res.json({
       _id: user._id,
       username: user.username,
       email: user.email,
-      token: generateToken(user._id),
+      token,
     });
   } else {
     res.status(401).json({ message: 'Invalid email or password' });
@@ -184,5 +192,10 @@ const changePassword = async (req, res) => {
   }
   };
 
+const logoutUser = async (req, res) => {
+  res.clearCookie('token');
+  res.json({ message: 'Logged out successfully' });
+};
 
-module.exports = { registerUser, authUser, getAllUsers, forgotPassword1, getResetToken,resetPassword1,changePassword  };
+
+module.exports = { registerUser, authUser, getAllUsers, forgotPassword1, getResetToken,resetPassword1,changePassword, logoutUser  };
