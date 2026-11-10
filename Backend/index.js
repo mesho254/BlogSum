@@ -1,17 +1,25 @@
 const express = require('express');
+const dns = require('dns');
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
+const path = require('path');
+
+// Use public DNS servers so Node's c-ares resolver can resolve MongoDB +srv records
+// when the local router/OS DNS stub refuses SRV queries (ECONNREFUSED)
+dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
 const bodyParser = require('body-parser');
 // const session = require('express-session');
 // const MongoStore = require('connect-mongo');
 // const cookieParser = require('cookie-parser');
 const authRoutes = require('./Routes/auth');
 const blogRoutes = require('./Routes/blogs');
+const { refreshBlogsCache, startScheduledBlogsCron } = require('./controllers/blogController');
 const userRoutes = require('./Routes/users');
 const notificationRoutes = require('./Routes/notifications');
 const messageRoutes = require('./Routes/messages');
 const channelRoutes = require('./Routes/channels');
-const subscribeRoutes = require('./Routes/subscribe')
+const subscribeRoutes = require('./Routes/subscribe');
+const adminRoutes = require('./Routes/admin');
 const cors = require('cors');
 const corsOptions = { origin: "*", credentials: true, optionSuccessStatus: 200 };
 
@@ -33,6 +41,7 @@ const io = new Server(server, {
 app.use(express.json());
 app.use(cors(corsOptions));
 app.use(bodyParser.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // app.use(cookieParser());
 
 // app.use(
@@ -50,24 +59,55 @@ app.use(bodyParser.json());
 //   })
 // );
 
+// Track active online users: userId -> Set of socketIds
+const onlineUsersMap = new Map();
+
+const broadcastOnlineUsers = () => {
+  io.emit('onlineUsers', Array.from(onlineUsersMap.keys()));
+};
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log('New client connected');
 
-  // Join a room based on user ID
+  // Join a room based on user ID and mark user online
   socket.on('join', (_id) => {
-    socket.join(_id.toString());
+    if (!_id) return;
+    const userId = _id.toString();
+    socket.userId = userId;
+    socket.join(userId);
+
+    if (!onlineUsersMap.has(userId)) {
+      onlineUsersMap.set(userId, new Set());
+    }
+    onlineUsersMap.get(userId).add(socket.id);
+    broadcastOnlineUsers();
+  });
+
+  socket.on('getOnlineUsers', () => {
+    socket.emit('onlineUsers', Array.from(onlineUsersMap.keys()));
   });
 
   socket.on('joinChannel', (channelId) => {
-    socket.join(channelId.toString());
+    if (channelId) {
+      socket.join(channelId.toString());
+    }
   });
 
   socket.on('disconnect', () => {
+    if (socket.userId && onlineUsersMap.has(socket.userId)) {
+      const userSockets = onlineUsersMap.get(socket.userId);
+      userSockets.delete(socket.id);
+      if (userSockets.size === 0) {
+        onlineUsersMap.delete(socket.userId);
+      }
+      broadcastOnlineUsers();
+    }
     console.log('Client disconnected');
   });
 });
 
+mongoose.set('strictQuery', false);
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -76,6 +116,10 @@ mongoose.connect(process.env.MONGO_URI, {
     console.log('MongoDB connected');
     // Attach io instance to app for use in routes
     app.set('io', io);
+    // Pre-warm the blogs cache on startup so the first request is instant
+    refreshBlogsCache().catch((err) => console.error('Initial blog cache warm-up failed:', err));
+    // Start node-cron job (every 30s) to auto-publish scheduled blogs & send notifications
+    startScheduledBlogsCron(io, '*/30 * * * * *');
   })
   .catch(err => console.error(err));
 
@@ -86,6 +130,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/channels', channelRoutes);
 app.use('/api/subscribe', subscribeRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.get("/", (req, res) => {
   res.status(200).json({

@@ -7,7 +7,7 @@ import reportWebVitals from './reportWebVitals';
 import { Provider } from 'react-redux';
 import store from './Redux/store';
 
-if (process.env.NODE_ENV !== "deployment")
+if (import.meta.env.MODE !== "deployment")
   console.log = () => {};
 
 

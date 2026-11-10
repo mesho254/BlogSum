@@ -1,24 +1,63 @@
-import { TOGGLE_LIKE, TOGGLE_BOOKMARK, SHARE_BLOG } from './actions';
+import {
+  TOGGLE_LIKE,
+  SET_LIKE_STATE,
+  TOGGLE_BOOKMARK,
+  SET_BOOKMARK_STATE,
+  SHARE_BLOG,
+} from './actions';
+
+const safeParse = (key, fallback = {}) => {
+  try {
+    return JSON.parse(localStorage.getItem(key)) || fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 const initialState = {
-  likes: JSON.parse(localStorage.getItem('likes')) || {},
-  bookmarks: JSON.parse(localStorage.getItem('bookmarks')) || {},
-  shares: JSON.parse(localStorage.getItem('shares')) || {},
+  likes: safeParse('likes', {}),
+  reactions: safeParse('reactions', {}),
+  bookmarks: safeParse('bookmarks', {}),
+  shares: safeParse('shares', {}),
 };
 
 const blogReducer = (state = initialState, action) => {
   let newState;
   switch (action.type) {
-    case TOGGLE_LIKE:
+    case TOGGLE_LIKE: {
+      const nextLiked = !state.likes[action.payload];
       newState = {
         ...state,
         likes: {
           ...state.likes,
-          [action.payload]: !state.likes[action.payload],
+          [action.payload]: nextLiked,
+        },
+        reactions: {
+          ...state.reactions,
+          [action.payload]: nextLiked ? state.reactions[action.payload] || 'love' : null,
         },
       };
       localStorage.setItem('likes', JSON.stringify(newState.likes));
+      localStorage.setItem('reactions', JSON.stringify(newState.reactions));
       return newState;
+    }
+    case SET_LIKE_STATE: {
+      const { blogId, isLiked, reactionType } = action.payload;
+      newState = {
+        ...state,
+        likes: {
+          ...state.likes,
+          [blogId]: Boolean(isLiked),
+        },
+        reactions: {
+          ...state.reactions,
+          [blogId]: isLiked ? reactionType || 'love' : null,
+        },
+      };
+      localStorage.setItem('likes', JSON.stringify(newState.likes));
+      localStorage.setItem('reactions', JSON.stringify(newState.reactions));
+      return newState;
+    }
     case TOGGLE_BOOKMARK:
       newState = {
         ...state,
@@ -29,6 +68,18 @@ const blogReducer = (state = initialState, action) => {
       };
       localStorage.setItem('bookmarks', JSON.stringify(newState.bookmarks));
       return newState;
+    case SET_BOOKMARK_STATE: {
+      const { blogId, isBookmarked } = action.payload;
+      newState = {
+        ...state,
+        bookmarks: {
+          ...state.bookmarks,
+          [blogId]: Boolean(isBookmarked),
+        },
+      };
+      localStorage.setItem('bookmarks', JSON.stringify(newState.bookmarks));
+      return newState;
+    }
     case SHARE_BLOG:
       newState = {
         ...state,

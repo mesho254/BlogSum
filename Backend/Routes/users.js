@@ -17,6 +17,7 @@ const {
   getMessages,
   getOtherLikedBlogs,
   getOtherUserProfile,
+  getPublicAuthorProfile,
   getLikeStatus,
   getBookmarkStatus,
   getBlogShareCount,
@@ -27,7 +28,8 @@ router.route('/profile')
   .get(protect, getUserProfile)
   .put(protect, upload.single('profilePicture'), updateUserProfile);
 
-router.route('/otherProfile/:id', getOtherUserProfile)
+router.get('/otherProfile/:id', getOtherUserProfile);
+router.get('/public-profile/:id', getPublicAuthorProfile);
 
 router.get('/bookmarked-blogs', protect, getBookmarkedBlogs);
 router.get('/liked-blogs', protect, getLikedBlogs)

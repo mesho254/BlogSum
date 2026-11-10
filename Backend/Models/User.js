@@ -15,6 +15,9 @@ const userSchema = new mongoose.Schema({
   followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   roles: { type: String, default: 'other' },
+  isVerified: { type: Boolean, default: false },
+  isSuspended: { type: Boolean, default: false },
+  bio: { type: String, default: '' },
   blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
 }, {
   timestamps: true

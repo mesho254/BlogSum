@@ -1,137 +1,166 @@
 import React from 'react';
 import Navbar from '../components/NavBar';
-import { Typography, Row, Col, Divider, List } from 'antd';
-
-const { Title, Paragraph } = Typography;
+import { LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import axiosInstance from '../axiosConfig';
 
 function PrivacyPolicy() {
+  const { data: publicSettings } = useQuery({
+    queryKey: ['publicSiteSettings'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/api/admin/public-settings');
+      return data;
+    },
+    staleTime: 60 * 1000,
+  });
+
+  const customText = publicSettings?.customPrivacyText?.trim();
   return (
-    <>
+    <div className="ed-policy-page">
       <Navbar />
-      <div style={{ marginTop: '100px', padding: '0 20px' }}>
-        {/* Hero Section */}
-        <Row justify="center" align="middle" style={{ minHeight: '40vh', background: '#f0f2f5', borderRadius: '8px', marginBottom: '40px' }}>
-          <Col xs={24} md={18} lg={16}>
-            <Title level={1} style={{ textAlign: 'center', color: '#1890ff' }}>Privacy Policy</Title>
-            <Paragraph style={{ textAlign: 'center', fontSize: '18px' }}>
-              At BlogSum, we value your privacy. This policy explains how we collect, use, and protect your personal information. Last updated: December 19, 2025.
-            </Paragraph>
-          </Col>
-        </Row>
 
-        {/* Introduction Section */}
-        <Row gutter={[16, 32]} justify="center">
-          <Col xs={24} md={20}>
-            <Title level={2}>Introduction</Title>
-            <Paragraph>
-              BlogSum ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy outlines our practices regarding the collection, use, and disclosure of your information when you use our website and services.
-            </Paragraph>
-            <Paragraph>
-              By using BlogSum, you agree to the collection and use of information in accordance with this policy.
-            </Paragraph>
-          </Col>
-        </Row>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 
-        <Divider />
+        .ed-policy-page {
+          min-height: 100vh;
+          background: #f8fafc;
+          color: #0f172a;
+          font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+          padding-top: 96px;
+          padding-bottom: 80px;
+        }
 
-        {/* Information Collection Section */}
-        <Row gutter={[16, 32]} justify="center">
-          <Col xs={24} md={20}>
-            <Title level={2}>Information We Collect</Title>
-            <Paragraph>
-              We collect several types of information for various purposes to provide and improve our service to you.
-            </Paragraph>
-            <List
-              size="large"
-              bordered
-              dataSource={[
-                'Personal Data: Email address, name, and other information you provide when registering.',
-                'Usage Data: Information on how the service is accessed and used (e.g., IP address, browser type).',
-                'Cookies and Tracking Data: We use cookies to track activity and enhance user experience.'
-              ]}
-              renderItem={item => <List.Item>{item}</List.Item>}
-            />
-          </Col>
-        </Row>
+        .ed-policy-container {
+          max-width: 860px;
+          margin: 0 auto;
+          padding: 0 24px;
+        }
 
-        <Divider />
+        .ed-policy-hero {
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 22px;
+          padding: 44px 36px;
+          margin-bottom: 32px;
+          box-shadow: 0 4px 20px -8px rgba(15, 23, 42, 0.04);
+        }
 
-        {/* Use of Data Section */}
-        <Row gutter={[16, 32]} justify="center">
-          <Col xs={24} md={20}>
-            <Title level={2}>Use of Data</Title>
-            <Paragraph>
-              BlogSum uses the collected data for various purposes:
-            </Paragraph>
-            <List
-              size="large"
-              bordered
-              dataSource={[
-                'To provide and maintain our service.',
-                'To notify you about changes to our service.',
-                'To allow you to participate in interactive features.',
-                'To provide customer support.',
-                'To gather analysis or valuable information so that we can improve our service.',
-                'To monitor the usage of our service.',
-                'To detect, prevent, and address technical issues.'
-              ]}
-              renderItem={item => <List.Item>{item}</List.Item>}
-            />
-          </Col>
-        </Row>
+        .ed-policy-kicker {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          font-size: 0.72rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: #4f46e5;
+          background: #eef2ff;
+          border: 1px solid #c7d2fe;
+          padding: 4px 12px;
+          border-radius: 999px;
+          margin-bottom: 14px;
+        }
 
-        <Divider />
+        .ed-policy-title {
+          font-family: 'Newsreader', Georgia, serif;
+          font-size: clamp(2rem, 3.5vw, 2.75rem);
+          font-weight: 600;
+          color: #0f172a;
+          margin: 0 0 10px 0;
+          letter-spacing: -0.025em;
+          line-height: 1.15;
+        }
 
-        {/* Disclosure of Data Section */}
-        <Row gutter={[16, 32]} justify="center">
-          <Col xs={24} md={20}>
-            <Title level={2}>Disclosure of Data</Title>
-            <Paragraph>
-              We may disclose your personal data in the good faith belief that such action is necessary to:
-            </Paragraph>
-            <List
-              size="large"
-              bordered
-              dataSource={[
-                'Comply with a legal obligation.',
-                'Protect and defend the rights or property of BlogSum.',
-                'Prevent or investigate possible wrongdoing in connection with the service.',
-                'Protect the personal safety of users or the public.',
-                'Protect against legal liability.'
-              ]}
-              renderItem={item => <List.Item>{item}</List.Item>}
-            />
-          </Col>
-        </Row>
+        .ed-policy-meta {
+          font-size: 0.85rem;
+          color: #64748b;
+          margin: 0;
+        }
 
-        <Divider />
+        .ed-policy-card {
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 20px;
+          padding: 36px 32px;
+          margin-bottom: 24px;
+          line-height: 1.75;
+          color: #334155;
+          font-size: 0.94rem;
+        }
 
-        {/* Security Section */}
-        <Row gutter={[16, 32]} justify="center">
-          <Col xs={24} md={20}>
-            <Title level={2}>Security of Data</Title>
-            <Paragraph>
-              The security of your data is important to us, but remember that no method of transmission over the Internet or method of electronic storage is 100% secure. While we strive to use commercially acceptable means to protect your personal data, we cannot guarantee its absolute security.
-            </Paragraph>
-          </Col>
-        </Row>
+        .ed-policy-sec-title {
+          font-family: 'Newsreader', Georgia, serif;
+          font-size: 1.35rem;
+          font-weight: 600;
+          color: #0f172a;
+          margin: 0 0 12px 0;
+        }
 
-        <Divider />
+        .ed-policy-list {
+          padding-left: 20px;
+          margin: 12px 0;
+        }
 
-        {/* Changes to Policy Section */}
-        <Row gutter={[16, 32]} justify="center" style={{ marginBottom: '40px' }}>
-          <Col xs={24} md={20}>
-            <Title level={2}>Changes to This Privacy Policy</Title>
-            <Paragraph>
-              We may update our Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page. You are advised to review this Privacy Policy periodically for any changes.
-            </Paragraph>
-            <Paragraph>
-              If you have any questions about this Privacy Policy, please contact us at privacy@blogsum.com.
-            </Paragraph>
-          </Col>
-        </Row>
+        .ed-policy-list li {
+          margin-bottom: 8px;
+        }
+      `}</style>
+
+      <div className="ed-policy-container">
+        <header className="ed-policy-hero">
+          <div className="ed-policy-kicker">
+            <LockOutlined />
+            <span>Legal &amp; Privacy Standards</span>
+          </div>
+          <h1 className="ed-policy-title">Privacy Policy</h1>
+          <p className="ed-policy-meta">
+            Effective Date: November 2026 &middot; BlogSum Editorial Publication
+          </p>
+        </header>
+
+        <article className="ed-policy-card">
+          {customText ? (
+            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{customText}</div>
+          ) : (
+            <>
+              <h2 className="ed-policy-sec-title">1. Introduction</h2>
+              <p>
+                BlogSum (&quot;we&quot;, &quot;our&quot;, or &quot;us&quot;) is committed to respecting and protecting the privacy of readers, authors, and contributors. This Privacy Policy details how we handle account credentials, reading telemetry, newsletter communications, and personal data across our digital publication.
+              </p>
+
+              <h2 className="ed-policy-sec-title" style={{ marginTop: 28 }}>2. Information We Collect</h2>
+              <p>We collect only the minimum information required to deliver a calm, high-signal reading and writing experience:</p>
+              <ul className="ed-policy-list">
+                <li><strong>Account Profile Data:</strong> Username, email address, profile picture, location, and optional author bio provided during registration or profile updates.</li>
+                <li><strong>Editorial Content:</strong> Essays, stories, images, tags, comments, reactions, bookmarks, and scheduled release configurations you create.</li>
+                <li><strong>Newsletter Subscriptions:</strong> Email addresses submitted to receive <em>The Weekly Dispatch</em>.</li>
+                <li><strong>Platform Telemetry:</strong> Anonymized reading interactions to compute estimated read times and popular essay rankings.</li>
+              </ul>
+
+              <h2 className="ed-policy-sec-title" style={{ marginTop: 28 }}>3. How We Use Your Data</h2>
+              <ul className="ed-policy-list">
+                <li>To publish and display your articles with appropriate author attribution.</li>
+                <li>To notify you when users comment on your stories or when authors you follow publish new essays.</li>
+                <li>To deliver the Weekly Dispatch newsletter (which you can unsubscribe from at any time).</li>
+                <li>To enforce platform safety, prevent automated spam, and investigate security concerns.</li>
+              </ul>
+
+              <h2 className="ed-policy-sec-title" style={{ marginTop: 28 }}>4. Data Security &amp; Retention</h2>
+              <p>
+                Passward hashes are encrypted using industry-standard bcrypt algorithms. All authenticated communication occurs over encrypted HTTPS connections. We never sell, rent, or trade your personal information with third-party advertisers.
+              </p>
+
+              <h2 className="ed-policy-sec-title" style={{ marginTop: 28 }}>5. Questions &amp; Inquiries</h2>
+              <p>
+                If you have questions regarding this policy or wish to request data removal, please visit our <Link to="/help#contact" style={{ color: '#4f46e5', fontWeight: 600 }}>Help &amp; Contact Desk</Link> or email us at <strong>privacy@blogsum.com</strong>.
+              </p>
+            </>
+          )}
+        </article>
       </div>
-    </>
+    </div>
   );
 }
 

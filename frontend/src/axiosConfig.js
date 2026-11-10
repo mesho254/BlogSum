@@ -1,9 +1,10 @@
 import axios from 'axios';
 
 const axiosInstance = axios.create({
-  // baseURL: 'https://blog-sum-rna1.vercel.app/',
-  baseURL: 'https://blogsum123.onrender.com',
-  // baseURL: 'http://localhost:5000',
+  baseURL:
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.REACT_APP_API_URL ||
+    'http://localhost:5000',
 });
 
 axiosInstance.interceptors.request.use((config) => {
@@ -14,14 +15,13 @@ axiosInstance.interceptors.request.use((config) => {
   return config;
 });
 
-// New: Response interceptor for auto-logout on 401 (expired token)
+// Response interceptor for auto-logout on 401 (expired token)
 axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('userInfo');
-      // Note: Cookie will expire automatically or be cleared on manual logout
-      window.location.href = '/login';  // Optional: Redirect to login
+      window.location.href = '/login';
     }
     return Promise.reject(error);
   }

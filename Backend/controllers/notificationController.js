@@ -59,3 +59,15 @@ exports.markAllAsRead = async (req, res) => {
     res.status(500).json({ message: 'Server error', error });
   }
 };
+
+// Delete a notification
+exports.deleteNotification = async (req, res) => {
+  try {
+    const notificationId = req.params.id;
+    await Notification.findByIdAndDelete(notificationId);
+    res.json({ message: 'Notification deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error });
+  }
+};
+

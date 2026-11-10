@@ -1,4 +1,5 @@
 const User = require('../Models/User');
+const Blog = require('../Models/Blog');
 const cloudinary = require('../config/cloudinary');
 const Notification = require('../Models/Notification')
 const multer = require('multer');
@@ -304,9 +305,62 @@ const getBlogShareCount = async (req, res) => {
   }
 };
 
+const getPublicAuthorProfile = async (req, res) => {
+  try {
+    const authorId = req.params.id;
+    const [user, authorBlogs] = await Promise.all([
+      User.findById(authorId)
+        .select('username email profilePicture location followers following likedBlogs')
+        .populate('followers', 'username profilePicture')
+        .populate('following', 'username profilePicture')
+        .lean(),
+      Blog.find({ author: authorId })
+        .select('title category date publishDate status readTime imageUrl likes reactions')
+        .sort({ date: -1 })
+        .lean(),
+    ]);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const now = new Date();
+    const publishedAuthorBlogs = (authorBlogs || []).filter((b) => {
+      if (b.status === 'draft') return false;
+      const pubTime = b.publishDate || b.date;
+      if (pubTime && new Date(pubTime) > now) return false;
+      return true;
+    });
+
+    const totalLikesReceived = publishedAuthorBlogs.reduce(
+      (sum, b) => sum + (Array.isArray(b.likes) ? b.likes.length : 0),
+      0
+    );
+
+    res.json({
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+      profilePicture: user.profilePicture,
+      location: user.location || '',
+      followers: user.followers || [],
+      following: user.following || [],
+      followersCount: Array.isArray(user.followers) ? user.followers.length : 0,
+      followingCount: Array.isArray(user.following) ? user.following.length : 0,
+      postsCount: publishedAuthorBlogs.length,
+      totalLikesReceived,
+      recentBlogs: publishedAuthorBlogs.slice(0, 2),
+    });
+  } catch (error) {
+    console.error('Error fetching public author profile:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   getUserProfile,
   getOtherUserProfile,
+  getPublicAuthorProfile,
   getOtherLikedBlogs,
   getBookmarkedBlogs,
   getLikeStatus,

@@ -5,15 +5,15 @@ import Banner from '../components/Banner'
 
 function Home({loading}) {
   return (
-    <>
+    <div style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '40px' }}>
       <Navbar/>
-      <div  style={{ position: 'relative', zIndex: 1000, marginTop:"100px", marginLeft:"20px", marginRight:"20px" }}>
+      <div style={{ position: 'relative', zIndex: 1, paddingTop: '96px' }}>
         <Banner/>
       </div>
-      <div style={{ padding: '20px', margin:"15px auto", alignContent:"center", alignItems:"center", justifyContent:"center" }}>
+      <div>
         <BlogList loading={loading}/>
       </div>
-    </>
+    </div>
   )
 }
 

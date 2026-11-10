@@ -1,38 +1,37 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import React from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import axiosInstance from '../axiosConfig';
 import useAuth from '../hooks/useAuth';
 
 const AdminDashboard = () => {
   const { user } = useAuth();
-  const [blogs, setBlogs] = useState([]);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const fetchBlogs = async () => {
-      const { data } = await axios.get(`/api/blogs`, {
-        headers: {
-          Authorization: `Bearer ${user.token}`
-        }
-      });
-      setBlogs(data);
-    };
-
-    fetchBlogs();
-  }, [user]);
+  const { data: blogs = [] } = useQuery({
+    queryKey: ['blogs'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/api/blogs');
+      return data;
+    },
+    staleTime: 30 * 1000,
+    refetchOnMount: 'always',
+  });
 
   const deleteBlog = async (id) => {
-    await axios.delete(`/api/blogs/${id}`, {
+    await axiosInstance.delete(`/api/blogs/${id}`, {
       headers: {
-        Authorization: `Bearer ${user.token}`
-      }
+        Authorization: `Bearer ${user?.token}`,
+      },
     });
-    setBlogs(blogs.filter(blog => blog._id !== id));
+    queryClient.setQueryData(['blogs'], (old = []) => old.filter((blog) => blog._id !== id));
+    queryClient.invalidateQueries({ queryKey: ['blogs'] });
   };
 
   return (
     <div>
       <h2>Admin Dashboard</h2>
       <div>
-        {blogs.map(blog => (
+        {blogs.map((blog) => (
           <div key={blog._id}>
             <h3>{blog.title}</h3>
             <p>{blog.content}</p>

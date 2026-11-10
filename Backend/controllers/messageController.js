@@ -165,10 +165,87 @@ const addReaction = async (req, res) => {
     if (message.channel) {
       io.to(message.channel.toString()).emit('reaction', emitData);
     } else {
-      io.to(message.sender.toString()).emit('reaction', emitData);
-      io.to(message.receiver.toString()).emit('reaction', emitData);
+      io.to(message.sender._id.toString()).emit('reaction', emitData);
+      if (message.receiver) {
+        io.to(message.receiver._id.toString()).emit('reaction', emitData);
+      }
     }
     res.json(message);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server Error');
+  }
+};
+
+const editMessage = async (req, res) => {
+  try {
+    const { message: newText } = req.body;
+    const msg = await Message.findById(req.params.messageId);
+    if (!msg) {
+      return res.status(404).send('Message not found');
+    }
+    if (msg.sender.toString() !== req.user._id.toString()) {
+      return res.status(401).send('Not authorized');
+    }
+    msg.message = newText;
+    msg.isEdited = true;
+    await msg.save();
+    await msg.populate('sender', 'username profilePicture');
+    if (msg.receiver) {
+      await msg.populate('receiver', 'username profilePicture');
+    }
+    await msg.populate('reactions.user', 'username');
+    await msg.populate({
+      path: 'replyTo',
+      populate: { path: 'sender', select: 'username profilePicture' },
+    });
+    await msg.populate({
+      path: 'forwardedFrom',
+      populate: { path: 'sender', select: 'username profilePicture' },
+    });
+
+    const io = req.app.get('io');
+    if (msg.channel) {
+      io.to(msg.channel.toString()).emit('editMessage', msg);
+    } else {
+      io.to(msg.sender._id.toString()).emit('editMessage', msg);
+      if (msg.receiver) {
+        io.to(msg.receiver._id.toString()).emit('editMessage', msg);
+      }
+    }
+    res.json(msg);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Server Error');
+  }
+};
+
+const deleteMessage = async (req, res) => {
+  try {
+    const msg = await Message.findById(req.params.messageId);
+    if (!msg) {
+      return res.status(404).send('Message not found');
+    }
+    if (msg.sender.toString() !== req.user._id.toString()) {
+      return res.status(401).send('Not authorized');
+    }
+    const channelId = msg.channel ? msg.channel.toString() : null;
+    const senderId = msg.sender.toString();
+    const receiverId = msg.receiver ? msg.receiver.toString() : null;
+
+    await msg.deleteOne();
+
+    const io = req.app.get('io');
+    const emitData = { messageId: req.params.messageId };
+    if (channelId) {
+      io.to(channelId).emit('deleteMessage', emitData);
+    } else {
+      io.to(senderId).emit('deleteMessage', emitData);
+      if (receiverId) {
+        io.to(receiverId).emit('deleteMessage', emitData);
+      }
+    }
+    res.sendStatus(200);
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
@@ -230,8 +307,10 @@ const restoreMessage = async (req, res) => {
     if (message.channel) {
       io.to(message.channel.toString()).emit('restoreMessage', emitData);
     } else {
-      io.to(message.sender.toString()).emit('restoreMessage', emitData);
-      io.to(message.receiver.toString()).emit('restoreMessage', emitData);
+      io.to(message.sender._id.toString()).emit('restoreMessage', emitData);
+      if (message.receiver) {
+        io.to(message.receiver._id.toString()).emit('restoreMessage', emitData);
+      }
     }
     res.json(message);
   } catch (err) {
@@ -256,8 +335,10 @@ const pinMessage = async (req, res) => {
     if (message.channel) {
       io.to(message.channel.toString()).emit('pinUpdate', emitData);
     } else {
-      io.to(message.sender.toString()).emit('pinUpdate', emitData);
-      io.to(message.receiver.toString()).emit('pinUpdate', emitData);
+      io.to(message.sender._id.toString()).emit('pinUpdate', emitData);
+      if (message.receiver) {
+        io.to(message.receiver._id.toString()).emit('pinUpdate', emitData);
+      }
     }
     res.json(message);
   } catch (err) {
@@ -282,8 +363,10 @@ const unpinMessage = async (req, res) => {
     if (message.channel) {
       io.to(message.channel.toString()).emit('pinUpdate', emitData);
     } else {
-      io.to(message.sender.toString()).emit('pinUpdate', emitData);
-      io.to(message.receiver.toString()).emit('pinUpdate', emitData);
+      io.to(message.sender._id.toString()).emit('pinUpdate', emitData);
+      if (message.receiver) {
+        io.to(message.receiver._id.toString()).emit('pinUpdate', emitData);
+      }
     }
     res.json(message);
   } catch (err) {
@@ -336,11 +419,21 @@ const removeFavorite = async (req, res) => {
 
 const reportMessage = async (req, res) => {
   try {
+    const { reason = '', comment = '' } = req.body || {};
     const message = await Message.findById(req.params.messageId);
     if (!message) return res.status(404).send('Message not found');
     message.reportedBy.addToSet(req.user._id);
+    if (!message.reports) {
+      message.reports = [];
+    }
+    message.reports.push({
+      user: req.user._id,
+      reason,
+      comment,
+      createdAt: new Date(),
+    });
     await message.save();
-    res.sendStatus(200);
+    res.status(200).json({ message: 'Report submitted successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
@@ -418,4 +511,23 @@ const getUnreadMessageCount = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage, getMessages, getChannelMessages, markMessagesAsRead, markMessagesAsDelivered, addReaction, trashMessage, restoreMessage, pinMessage, unpinMessage, addFavorite, removeFavorite, reportMessage, getFavorites, getTrash, getUnreadMessageCount };
+module.exports = {
+  sendMessage,
+  getMessages,
+  getChannelMessages,
+  markMessagesAsRead,
+  markMessagesAsDelivered,
+  addReaction,
+  editMessage,
+  deleteMessage,
+  trashMessage,
+  restoreMessage,
+  pinMessage,
+  unpinMessage,
+  addFavorite,
+  removeFavorite,
+  reportMessage,
+  getFavorites,
+  getTrash,
+  getUnreadMessageCount,
+};

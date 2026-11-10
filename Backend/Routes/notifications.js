@@ -13,6 +13,9 @@ router.get('/:id', notificationController.getNotificationById)
 
 router.put('/:id/unread', notificationController.markAsUnread)
 
+// Delete a notification
+router.delete('/:id', protect, notificationController.deleteNotification);
+
 // Mark all notifications as read for a user
 router.put('/read/all', protect, notificationController.markAllAsRead);
 

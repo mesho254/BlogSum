@@ -1,51 +1,70 @@
-import React from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Avatar, Card, Tabs, List, message, Button, Skeleton } from 'antd';
-import { EnvironmentOutlined, StopOutlined } from '@ant-design/icons';
+import React, { useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { Avatar, Tabs, Row, Col, message, Button, Skeleton, Empty } from 'antd';
+import {
+  EnvironmentOutlined,
+  StopOutlined,
+  MailOutlined,
+  UserAddOutlined,
+  CheckOutlined,
+  FileTextOutlined,
+  HeartOutlined,
+  TeamOutlined,
+  UserOutlined,
+  ArrowLeftOutlined,
+} from '@ant-design/icons';
 import axiosInstance from '../axiosConfig';
 import BlogCard from './BlogCard';
 import Navbar from './NavBar';
 import useAuth from '../hooks/useAuth';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-
-const { TabPane } = Tabs;
+import AuthorHoverCard from './AuthorHoverCard';
 
 const OtherProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const [activeTabKey, setActiveTabKey] = useState('1');
 
-  // Fetch user profile
   const profileQuery = useQuery({
     queryKey: ['otherProfile', id],
     queryFn: async () => {
       const response = await axiosInstance.get(`/api/users/${id}`);
       const profileData = response.data;
 
-      // If viewing own profile, redirect to /profile
       if (profileData._id === user?._id) {
         navigate('/profile', { replace: true });
       }
 
       return profileData;
     },
-    enabled: !!user?._id, // Wait until user is loaded
+    enabled: !!user?._id,
   });
 
-  // Fetch user's blogs
   const blogsQuery = useQuery({
     queryKey: ['otherBlogs', id],
-    queryFn: () => axiosInstance.get(`/api/blogs/otherBlogs/${id}`).then(res => res.data),
+    queryFn: () => axiosInstance.get(`/api/blogs/otherBlogs/${id}`).then((res) => res.data),
+    refetchOnMount: 'always',
   });
 
-  // Fetch user's liked blogs
   const likedBlogsQuery = useQuery({
     queryKey: ['otherLikedBlogs', id],
-    queryFn: () => axiosInstance.get(`/api/users/otherLiked/${id}`).then(res => res.data),
+    queryFn: () => axiosInstance.get(`/api/users/otherLiked/${id}`).then((res) => res.data),
+    refetchOnMount: 'always',
   });
 
-  // Fetch block status
+  const followStateQuery = useQuery({
+    queryKey: ['followState', id],
+    queryFn: () =>
+      axiosInstance
+        .get(`/api/users/${id}/follow-state`, {
+          headers: { Authorization: `Bearer ${user?.token}` },
+        })
+        .then((res) => Boolean(res.data.isFollowing)),
+    enabled: !!user?.token && !!id && String(user._id) !== String(id),
+  });
+
   const blockStatusQuery = useQuery({
     queryKey: ['blockStatus', id],
     queryFn: () =>
@@ -53,18 +72,34 @@ const OtherProfile = () => {
         .get(`/api/users/${id}/blockStatus`, {
           headers: { Authorization: `Bearer ${user?.token}` },
         })
-        .then(res => res.data.isBlocked),
+        .then((res) => res.data.isBlocked),
     enabled: !!user?.token,
   });
 
-  // Mutation: Block user
+  const followMutation = useMutation({
+    mutationFn: async (currentlyFollowing) => {
+      const endpoint = currentlyFollowing
+        ? `/api/users/${id}/unfollow`
+        : `/api/users/${id}/follow`;
+      return axiosInstance.put(endpoint, null, {
+        headers: { Authorization: `Bearer ${user?.token}` },
+      });
+    },
+    onSuccess: (_, currentlyFollowing) => {
+      const next = !currentlyFollowing;
+      queryClient.setQueryData(['followState', id], next);
+      queryClient.invalidateQueries({ queryKey: ['otherProfile', id] });
+      queryClient.invalidateQueries({ queryKey: ['authorPreview', id] });
+      message.success(next ? 'Now following user' : 'Unfollowed user');
+    },
+    onError: () => message.error('Could not update follow status'),
+  });
+
   const blockMutation = useMutation({
     mutationFn: () =>
-      axiosInstance.put(
-        `/api/users/${id}/block`,
-        null,
-        { headers: { Authorization: `Bearer ${user?.token}` } }
-      ),
+      axiosInstance.put(`/api/users/${id}/block`, null, {
+        headers: { Authorization: `Bearer ${user?.token}` },
+      }),
     onSuccess: () => {
       queryClient.setQueryData(['blockStatus', id], true);
       message.success('User blocked successfully');
@@ -72,14 +107,11 @@ const OtherProfile = () => {
     onError: () => message.error('Failed to block user'),
   });
 
-  // Mutation: Unblock user
   const unblockMutation = useMutation({
     mutationFn: () =>
-      axiosInstance.put(
-        `/api/users/${id}/unblock`,
-        null,
-        { headers: { Authorization: `Bearer ${user?.token}` } }
-      ),
+      axiosInstance.put(`/api/users/${id}/unblock`, null, {
+        headers: { Authorization: `Bearer ${user?.token}` },
+      }),
     onSuccess: () => {
       queryClient.setQueryData(['blockStatus', id], false);
       message.success('User unblocked successfully');
@@ -87,197 +119,601 @@ const OtherProfile = () => {
     onError: () => message.error('Failed to unblock user'),
   });
 
-  const handleBlock = () => blockMutation.mutate();
-  const handleUnblock = () => unblockMutation.mutate();
-
   const isLoading =
     profileQuery.isLoading ||
     blogsQuery.isLoading ||
     likedBlogsQuery.isLoading ||
     blockStatusQuery.isLoading;
 
-  const isError =
-    profileQuery.isError ||
-    blogsQuery.isError ||
-    likedBlogsQuery.isError ||
-    blockStatusQuery.isError;
-
   if (isLoading) {
     return (
-      <>
+      <div style={{ background: '#f8fafc', minHeight: '100vh' }}>
         <Navbar />
-        <div style={{ padding: '20px', margin: '100px auto', width: '100%' }}>
+        <div style={{ padding: '120px 20px', maxWidth: '1200px', margin: '0 auto' }}>
           <Skeleton active avatar paragraph={{ rows: 6 }} />
         </div>
-      </>
+      </div>
     );
   }
 
-  if (isError || !profileQuery.data) {
+  if (profileQuery.isError || !profileQuery.data) {
     return (
-      <>
+      <div style={{ background: '#f8fafc', minHeight: '100vh' }}>
         <Navbar />
-        <div style={{ padding: '20px', textAlign: 'center', marginTop: '100px' }}>
-          <p>Error loading profile. Please try again later.</p>
+        <div style={{ padding: '140px 20px', textAlign: 'center' }}>
+          <p style={{ color: '#64748b' }}>Error loading profile. Please try again later.</p>
         </div>
-      </>
+      </div>
     );
   }
 
   const profile = profileQuery.data;
-  const Blogs = blogsQuery.data || [];
+  const now = new Date();
+  const userBlogs = (blogsQuery.data || []).filter((b) => {
+    if (!b || b.status === 'draft') return false;
+    const pubTime = b.publishDate || b.date;
+    if (pubTime && new Date(pubTime) > now) return false;
+    return true;
+  });
+  const totalLikesReceived = userBlogs.reduce(
+    (sum, blog) => sum + (Array.isArray(blog?.likes) ? blog.likes.length : 0),
+    0
+  );
   const likedBlogs = likedBlogsQuery.data || [];
   const blocked = blockStatusQuery.data || false;
+  const isFollowing = followStateQuery.data || false;
+
+  const renderBlogsGrid = (blogsList, emptyText) => {
+    if (!blogsList || blogsList.length === 0) {
+      return (
+        <div
+          style={{
+            background: '#ffffff',
+            borderRadius: '20px',
+            border: '1px dashed #cbd5e1',
+            padding: '48px 24px',
+            textAlign: 'center',
+          }}
+        >
+          <Empty description={<span style={{ color: '#64748b' }}>{emptyText}</span>} />
+        </div>
+      );
+    }
+    return (
+      <Row gutter={[24, 24]} align="stretch">
+        {blogsList.map((blog) => (
+          <Col
+            xs={24}
+            sm={12}
+            md={8}
+            lg={8}
+            key={blog._id}
+            style={{ minWidth: '320px', display: 'flex' }}
+          >
+            <BlogCard blog={blog} />
+          </Col>
+        ))}
+      </Row>
+    );
+  };
+
+  const renderPeopleGrid = (peopleList, emptyText) => {
+    if (!peopleList || peopleList.length === 0) {
+      return (
+        <div
+          style={{
+            background: '#ffffff',
+            borderRadius: '20px',
+            border: '1px dashed #cbd5e1',
+            padding: '48px 24px',
+            textAlign: 'center',
+          }}
+        >
+          <Empty description={<span style={{ color: '#64748b' }}>{emptyText}</span>} />
+        </div>
+      );
+    }
+    return (
+      <Row gutter={[16, 16]}>
+        {peopleList.map((person) => (
+          <Col xs={24} sm={12} md={8} key={person._id}>
+            <AuthorHoverCard author={person}>
+              <Link
+                to={`/profile/${person._id}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '14px 18px',
+                  background: '#ffffff',
+                  borderRadius: '16px',
+                  border: '1px solid #e2e8f0',
+                  textDecoration: 'none',
+                  width: '100%',
+                }}
+              >
+                <Avatar
+                  size={46}
+                  src={person.profilePicture}
+                  style={{ backgroundColor: '#4f46e5', fontWeight: 700 }}
+                >
+                  {person.username?.[0]?.toUpperCase()}
+                </Avatar>
+                <div>
+                  <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '14.5px' }}>
+                    {person.username}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>View creator profile</div>
+                </div>
+              </Link>
+            </AuthorHoverCard>
+          </Col>
+        ))}
+      </Row>
+    );
+  };
+
+  const tabItems = [
+    {
+      key: '1',
+      title: 'Articles',
+      icon: <FileTextOutlined />,
+      count: userBlogs.length,
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+          <FileTextOutlined /> Articles ({userBlogs.length})
+        </span>
+      ),
+      children: renderBlogsGrid(userBlogs, 'No published articles yet.'),
+    },
+    {
+      key: '2',
+      title: 'Liked Stories',
+      icon: <HeartOutlined />,
+      count: likedBlogs.length,
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+          <HeartOutlined /> Liked ({likedBlogs.length})
+        </span>
+      ),
+      children: renderBlogsGrid(likedBlogs, 'No liked articles yet.'),
+    },
+    {
+      key: '3',
+      title: 'Following',
+      icon: <UserOutlined />,
+      count: profile.following?.length || 0,
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+          <UserOutlined /> Following ({profile.following?.length || 0})
+        </span>
+      ),
+      children: renderPeopleGrid(profile.following, 'Not following anyone yet.'),
+    },
+    {
+      key: '4',
+      title: 'Followers',
+      icon: <TeamOutlined />,
+      count: profile.followers?.length || 0,
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+          <TeamOutlined /> Followers ({profile.followers?.length || 0})
+        </span>
+      ),
+      children: renderPeopleGrid(profile.followers, 'No followers yet.'),
+    },
+  ];
 
   return (
-    <>
+    <div style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '60px' }}>
       <Navbar />
-      <div style={{ padding: '20px', margin: '100px auto', width: '100%' }}>
-        <Card>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap' }}>
-            <Avatar size={64} src={profile.profilePicture} />
-            <div style={{ marginLeft: '20px' }}>
-              <h2>{profile.username}</h2>
-              <p>{profile.email}</p>
-              <p>
-                <EnvironmentOutlined /> {profile.location || 'No location set'}
-              </p>
-            </div>
-            <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-              <div
-                style={{
-                  textAlign: 'center',
-                  margin: '0 10px',
-                  border: '1px purple solid',
-                  padding: '10px',
-                  borderRadius: '20px',
-                }}
-              >
-                <p>Followers</p>
-                <p style={{ fontSize: '20px', fontWeight: 'bold', minWidth: '70px' }}>
-                  {profile.followers?.length || 0}
-                </p>
-              </div>
-              <div
-                style={{
-                  textAlign: 'center',
-                  margin: '0 10px',
-                  border: '1px purple solid',
-                  padding: '10px',
-                  borderRadius: '20px',
-                }}
-              >
-                <p>Following</p>
-                <p style={{ fontSize: '20px', fontWeight: 'bold', minWidth: '70px' }}>
-                  {profile.following?.length || 0}
-                </p>
-              </div>
-              <div
-                style={{
-                  textAlign: 'center',
-                  margin: '0 10px',
-                  border: '1px purple solid',
-                  padding: '10px',
-                  borderRadius: '20px',
-                }}
-              >
-                <p>Likes</p>
-                <p style={{ fontSize: '20px', fontWeight: 'bold', minWidth: '70px' }}>
-                  {profile.likedBlogs?.length || 0}
-                </p>
-              </div>
-            </div>
-            <div>
-              {blocked ? (
-                <Button onClick={handleUnblock} loading={unblockMutation.isPending}>
-                  Unblock User
-                </Button>
-              ) : (
-                <Button
-                  icon={<StopOutlined />}
-                  onClick={handleBlock}
-                  loading={blockMutation.isPending}
-                >
-                  Block User
-                </Button>
-              )}
+      <div style={{ maxWidth: '1240px', width: '94%', margin: '0 auto', paddingTop: '100px' }}>
+        <Button
+          type="text"
+          icon={<ArrowLeftOutlined />}
+          onClick={() => navigate(-1)}
+          style={{ marginBottom: '14px', borderRadius: '999px', fontWeight: 600, color: '#475569' }}
+        >
+          Back
+        </Button>
+
+        {/* Modern Editorial Creator Profile Header */}
+        <div
+          style={{
+            background: '#ffffff',
+            borderRadius: '24px',
+            border: '1px solid #e2e8f0',
+            overflow: 'hidden',
+            boxShadow: '0 14px 36px -12px rgba(15, 23, 42, 0.06)',
+            marginBottom: '28px',
+          }}
+        >
+          {/* Modern Editorial Cover Banner */}
+          <div
+            className="ed-profile-banner"
+            style={{
+              height: '145px',
+              position: 'relative',
+              background: '#090d16',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Ambient editorial light mesh */}
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundImage: `
+                  radial-gradient(circle at 18% 28%, rgba(99, 102, 241, 0.32) 0%, transparent 48%),
+                  radial-gradient(circle at 82% 72%, rgba(14, 165, 233, 0.24) 0%, transparent 52%),
+                  radial-gradient(circle at 50% 100%, rgba(168, 85, 247, 0.18) 0%, transparent 60%)
+                `,
+              }}
+            />
+            {/* Subtle editorial dot texture */}
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                opacity: 0.12,
+                backgroundImage:
+                  'radial-gradient(rgba(255, 255, 255, 0.9) 1px, transparent 1px)',
+                backgroundSize: '22px 22px',
+              }}
+            />
+            {/* Publication space pill */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 20,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                padding: '5px 14px',
+                borderRadius: '999px',
+                background: 'rgba(255, 255, 255, 0.08)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255, 255, 255, 0.14)',
+                color: 'rgba(255, 255, 255, 0.88)',
+                fontSize: '11px',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#38bdf8' }} />
+              Creator Profile
             </div>
           </div>
-        </Card>
 
-        <Tabs defaultActiveKey="1" style={{ marginTop: 20 }}>
-          <TabPane tab="Posts" key="1">
-            {Blogs.length === 0 ? (
-              <p style={{ textAlign: 'center', padding: '40px' }}>No posts yet.</p>
-            ) : (
-              <List
-                grid={{ gutter: 16, xs: 1, sm: 2, md: 3 }}
-                dataSource={Blogs}
-                renderItem={(blog) => (
-                  <List.Item>
-                    <BlogCard blog={blog} />
-                  </List.Item>
-                )}
-              />
-            )}
-          </TabPane>
+          <div style={{ padding: '0 28px 26px' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                flexWrap: 'wrap',
+                gap: '16px',
+                marginTop: '-48px',
+                marginBottom: '18px',
+              }}
+            >
+              <Avatar
+                size={98}
+                src={profile.profilePicture}
+                style={{
+                  border: '4px solid #ffffff',
+                  backgroundColor: '#0f172a',
+                  fontSize: '38px',
+                  fontWeight: 700,
+                  boxShadow: '0 10px 25px -5px rgba(15, 23, 42, 0.18)',
+                }}
+              >
+                {profile.username?.[0]?.toUpperCase()}
+              </Avatar>
 
-          <TabPane tab="Liked Blogs" key="2">
-            {likedBlogs.length === 0 ? (
-              <p style={{ textAlign: 'center', padding: '40px' }}>No liked blogs.</p>
-            ) : (
-              <List
-                grid={{ gutter: 16, xs: 1, sm: 2, md: 3 }}
-                dataSource={likedBlogs}
-                renderItem={(blog) => (
-                  <List.Item>
-                    <BlogCard blog={blog} />
-                  </List.Item>
-                )}
-              />
-            )}
-          </TabPane>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <Button
+                  type={isFollowing ? 'default' : 'primary'}
+                  icon={isFollowing ? <CheckOutlined /> : <UserAddOutlined />}
+                  loading={followMutation.isPending}
+                  onClick={() => followMutation.mutate(isFollowing)}
+                  style={{
+                    borderRadius: '999px',
+                    fontWeight: 700,
+                    height: '38px',
+                    padding: '0 20px',
+                    ...(isFollowing
+                      ? {}
+                      : {
+                          background: '#0f172a',
+                          border: 'none',
+                          boxShadow: '0 4px 14px rgba(15, 23, 42, 0.2)',
+                        }),
+                  }}
+                >
+                  {isFollowing ? 'Following' : 'Follow'}
+                </Button>
 
-          <TabPane tab="Following" key="3">
-            {profile.following?.length === 0 ? (
-              <p style={{ textAlign: 'center', padding: '40px' }}>Not following anyone.</p>
-            ) : (
-              <List
-                style={{ margin: '20px 10px' }}
-                dataSource={profile.following}
-                renderItem={(followed) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      avatar={<Avatar src={followed.profilePicture} />}
-                      title={followed.username}
-                    />
-                  </List.Item>
+                {blocked ? (
+                  <Button
+                    onClick={() => unblockMutation.mutate()}
+                    loading={unblockMutation.isPending}
+                    style={{ borderRadius: '999px', fontWeight: 600, height: '38px' }}
+                  >
+                    Unblock User
+                  </Button>
+                ) : (
+                  <Button
+                    danger
+                    icon={<StopOutlined />}
+                    onClick={() => blockMutation.mutate()}
+                    loading={blockMutation.isPending}
+                    style={{ borderRadius: '999px', fontWeight: 600, height: '38px' }}
+                  >
+                    Block
+                  </Button>
                 )}
-              />
-            )}
-          </TabPane>
+              </div>
+            </div>
 
-          <TabPane tab="Followers" key="4">
-            {profile.followers?.length === 0 ? (
-              <p style={{ textAlign: 'center', padding: '40px' }}>No followers yet.</p>
-            ) : (
-              <List
-                style={{ margin: '20px 10px' }}
-                dataSource={profile.followers}
-                renderItem={(follower) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      avatar={<Avatar src={follower.profilePicture} />}
-                      title={follower.username}
-                    />
-                  </List.Item>
-                )}
-              />
-            )}
-          </TabPane>
-        </Tabs>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '20px',
+              }}
+            >
+              <div>
+                <h1
+                  style={{
+                    fontSize: '1.75rem',
+                    fontWeight: 800,
+                    color: '#0f172a',
+                    margin: '0 0 6px',
+                    letterSpacing: '-0.02em',
+                  }}
+                >
+                  {profile.username}
+                </h1>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '16px',
+                    color: '#64748b',
+                    fontSize: '13.5px',
+                  }}
+                >
+                  {profile.email && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <MailOutlined style={{ color: '#6366f1' }} /> {profile.email}
+                    </span>
+                  )}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <EnvironmentOutlined style={{ color: '#6366f1' }} />{' '}
+                    {profile.location || 'Location not set'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Modern Unified Stats Ribbon */}
+              <div className="ed-profile-stats-ribbon">
+                {[
+                  { label: 'Articles', value: userBlogs.length, targetKey: '1' },
+                  { label: 'Followers', value: profile.followers?.length || 0, targetKey: '4' },
+                  { label: 'Following', value: profile.following?.length || 0, targetKey: '3' },
+                  { label: 'Likes', value: totalLikesReceived, targetKey: '2' },
+                ].map((stat, idx, arr) => (
+                  <button
+                    key={stat.label}
+                    type="button"
+                    onClick={() => setActiveTabKey(stat.targetKey)}
+                    className={`ed-stat-item-btn ${activeTabKey === stat.targetKey ? 'active' : ''}`}
+                    title={`View ${stat.label}`}
+                  >
+                    <span className="ed-stat-value">{stat.value}</span>
+                    <span className="ed-stat-label">{stat.label}</span>
+                    {idx < arr.length - 1 && <span className="ed-stat-divider" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Bespoke Modern Editorial Segmented Tab Bar */}
+        <div className="ed-profile-tabs-wrapper">
+          <div className="ed-profile-tabs-nav" role="tablist">
+            {tabItems.map((tab) => {
+              const isActive = activeTabKey === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveTabKey(tab.key)}
+                  className={`ed-profile-tab-pill ${isActive ? 'active' : ''}`}
+                >
+                  <span className="ed-profile-tab-icon">{tab.icon}</span>
+                  <span className="ed-profile-tab-text">{tab.title}</span>
+                  {typeof tab.count === 'number' && (
+                    <span className={`ed-profile-tab-count ${isActive ? 'active' : ''}`}>
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Active Tab Panel */}
+        <div className="ed-profile-tab-panel">
+          {tabItems.find((t) => t.key === activeTabKey)?.children}
+        </div>
+
+        <style>{`
+          .ed-profile-stats-ribbon {
+            display: inline-flex;
+            align-items: center;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 4px;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+          }
+          .ed-stat-item-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-width: 84px;
+            padding: 8px 16px;
+            border-radius: 12px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            font-family: inherit;
+          }
+          .ed-stat-item-btn:hover {
+            background: #ffffff;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+          }
+          .ed-stat-item-btn.active {
+            background: #ffffff;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+          }
+          .ed-stat-value {
+            font-size: 19px;
+            font-weight: 800;
+            color: #0f172a;
+            line-height: 1.2;
+          }
+          .ed-stat-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-top: 2px;
+          }
+          .ed-stat-item-btn.active .ed-stat-label {
+            color: #0f172a;
+          }
+          .ed-stat-divider {
+            position: absolute;
+            right: 0;
+            top: 22%;
+            height: 56%;
+            width: 1px;
+            background: #e2e8f0;
+            pointer-events: none;
+          }
+          .ed-profile-tabs-wrapper {
+            margin-bottom: 28px;
+            overflow-x: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            padding: 4px 0;
+          }
+          .ed-profile-tabs-wrapper::-webkit-scrollbar {
+            display: none;
+          }
+          .ed-profile-tabs-nav {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #ffffff;
+            padding: 6px;
+            border-radius: 16px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+            max-width: 100%;
+          }
+          .ed-profile-tab-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 11px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #64748b;
+            font-size: 13.5px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            font-family: inherit;
+          }
+          .ed-profile-tab-pill:hover:not(.active) {
+            color: #0f172a;
+            background: #f8fafc;
+          }
+          .ed-profile-tab-pill.active {
+            background: #0f172a;
+            color: #ffffff;
+            border-color: #0f172a;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.16);
+          }
+          .ed-profile-tab-icon {
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            transition: transform 0.2s;
+          }
+          .ed-profile-tab-pill:hover .ed-profile-tab-icon {
+            transform: translateY(-1px);
+          }
+          .ed-profile-tab-text {
+            line-height: 1;
+          }
+          .ed-profile-tab-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 20px;
+            padding: 0 6px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            background: #f1f5f9;
+            color: #475569;
+            transition: all 0.2s;
+          }
+          .ed-profile-tab-pill:hover .ed-profile-tab-count:not(.active) {
+            background: #e2e8f0;
+            color: #0f172a;
+          }
+          .ed-profile-tab-count.active {
+            background: rgba(255, 255, 255, 0.22);
+            color: #ffffff;
+          }
+          .ed-profile-tab-panel {
+            animation: edProfileFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+          }
+          @keyframes edProfileFadeIn {
+            from {
+              opacity: 0;
+              transform: translateY(4px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+        `}</style>
       </div>
-    </>
+    </div>
   );
 };
 

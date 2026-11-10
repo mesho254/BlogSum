@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../Models/User');
-const Token = require('../Models/Token')
+const Token = require('../Models/Token');
+const SiteSettings = require('../Models/SiteSettings');
 const Joi = require("joi");
 const bcrypt = require('bcryptjs');
 const sendEmail = require("../Utils/sendEmail");
@@ -18,11 +19,26 @@ const generateToken = (id) => {
 
 const registerUser = async (req, res) => {
   const { username, email, password } = req.body;
+
+  const settings = await SiteSettings.findOne({ key: 'global' }).lean();
+  if (settings && settings.allowRegistrations === false) {
+    return res.status(403).json({
+      message: 'New account registrations are currently paused by the administrator.',
+    });
+  }
+
   const userExists = await User.findOne({ email });
   if (userExists) {
     return res.status(400).json({ message: 'User already exists' });
   }
-  const user = await User.create({ username, email, password });
+  const initialRole =
+    String(username || '').trim().toLowerCase() === 'admin' ? 'admin' : 'other';
+  const user = await User.create({
+    username,
+    email,
+    password,
+    roles: initialRole,
+  });
   if (user) {
     const token = generateToken(user._id);
     res.cookie('token', token, {
@@ -35,6 +51,9 @@ const registerUser = async (req, res) => {
       _id: user._id,
       username: user.username,
       email: user.email,
+      roles: user.roles,
+      isVerified: Boolean(user.isVerified),
+      profilePicture: user.profilePicture || '',
       token,  // Still send in JSON for localStorage
     });
   } else {
@@ -46,6 +65,17 @@ const authUser = async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email });
   if (user && (await user.matchPassword(password))) {
+    if (String(user.username || '').trim().toLowerCase() === 'admin' && user.roles !== 'admin') {
+      user.roles = 'admin';
+      await user.save();
+    }
+
+    if (user.isSuspended && user.roles !== 'admin') {
+      return res.status(403).json({
+        message: 'Your account has been suspended by an administrator. Please contact support.',
+      });
+    }
+
     const token = generateToken(user._id);
     res.cookie('token', token, {
       httpOnly: true,
@@ -57,6 +87,9 @@ const authUser = async (req, res) => {
       _id: user._id,
       username: user.username,
       email: user.email,
+      roles: user.roles,
+      isVerified: Boolean(user.isVerified),
+      profilePicture: user.profilePicture || '',
       token,
     });
   } else {
@@ -102,7 +135,16 @@ const forgotPassword1 = async (req, res) => {
 		}
 
 		const url = `${process.env.BASE_URL}/password-reset/${user._id}/${token.token}`;
-		await sendEmail(user.email, "Click the Link below for Password Reset", url);
+		const resetHtml = sendEmail.buildPasswordResetEmail({
+			username: user.username || user.email,
+			resetUrl: url,
+		});
+		await sendEmail(
+			user.email,
+			"Reset your BlogSum password",
+			`Reset your BlogSum password by visiting: ${url}`,
+			resetHtml
+		);
 
 		res
 			.status(200)

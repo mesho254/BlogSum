@@ -14,9 +14,16 @@ const messageSchema = mongoose.Schema({
   replyTo: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
   forwardedFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null },
   isDeleted: { type: Boolean, default: false },
+  isEdited: { type: Boolean, default: false },
   isPinned: { type: Boolean, default: false },
   favoritedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  reportedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+  reportedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  reports: [{
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reason: { type: String, default: '' },
+    comment: { type: String, default: '' },
+    createdAt: { type: Date, default: Date.now }
+  }]
 }, {
   timestamps: true
 });
