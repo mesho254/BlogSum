@@ -94,6 +94,19 @@ function Doc() {
           max-width: 920px;
           margin: 0 auto;
           padding: 0 24px;
+          transition: max-width 0.2s ease;
+        }
+        @media (min-width: 1536px) {
+          .ed-doc-container {
+            max-width: 1320px;
+            width: 94%;
+          }
+        }
+        @media (min-width: 1920px) {
+          .ed-doc-container {
+            max-width: 1540px;
+            width: 95%;
+          }
         }
 
         .ed-doc-hero {

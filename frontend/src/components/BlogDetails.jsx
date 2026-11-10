@@ -1623,6 +1623,48 @@ const BlogDetail = () => {
           background: #f3f4f6;
           color: #111827;
         }
+
+        /* Wide screen responsive expansion (23" & 27" monitors) */
+        @media (min-width: 1536px) {
+          .ed-header-col {
+            max-width: 880px;
+          }
+          .ed-wide-figure {
+            max-width: 1380px;
+          }
+          .ed-wide-image {
+            max-height: 620px;
+          }
+          .ed-reading-grid {
+            max-width: 1120px;
+            grid-template-columns: 64px minmax(0, 780px);
+            gap: 56px;
+          }
+          .ed-more-section {
+            max-width: 1380px;
+          }
+        }
+        @media (min-width: 1920px) {
+          .ed-header-col {
+            max-width: 980px;
+          }
+          .ed-wide-figure {
+            max-width: 1540px;
+            width: 95%;
+          }
+          .ed-wide-image {
+            max-height: 680px;
+          }
+          .ed-reading-grid {
+            max-width: 1220px;
+            grid-template-columns: 72px minmax(0, 840px);
+            gap: 64px;
+          }
+          .ed-more-section {
+            max-width: 1540px;
+            width: 95%;
+          }
+        }
       `}</style>
     </div>
   );

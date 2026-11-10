@@ -1136,6 +1136,18 @@ const BlogForm = () => {
           justify-content: space-between;
           gap: 16px;
           flex-wrap: wrap;
+          transition: max-width 0.2s ease;
+        }
+        @media (min-width: 1536px) {
+          .studio-topbar__inner {
+            max-width: 1620px;
+          }
+        }
+        @media (min-width: 1920px) {
+          .studio-topbar__inner {
+            max-width: 1780px;
+            width: 96%;
+          }
         }
         .studio-topbar__left {
           display: flex;
@@ -1239,6 +1251,28 @@ const BlogForm = () => {
           margin: 28px auto 0;
           display: grid;
           gap: 36px;
+          transition: max-width 0.2s ease;
+        }
+        @media (min-width: 1536px) {
+          .studio-workspace {
+            max-width: 1620px;
+            gap: 44px;
+          }
+          .studio-workspace.mode-editor,
+          .studio-workspace.mode-preview {
+            grid-template-columns: minmax(0, 960px);
+          }
+        }
+        @media (min-width: 1920px) {
+          .studio-workspace {
+            max-width: 1780px;
+            width: 96%;
+            gap: 52px;
+          }
+          .studio-workspace.mode-editor,
+          .studio-workspace.mode-preview {
+            grid-template-columns: minmax(0, 1040px);
+          }
         }
         .studio-workspace.mode-split {
           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

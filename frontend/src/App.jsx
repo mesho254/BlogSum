@@ -82,7 +82,7 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <div className="App">
           <main className="app-main-content">
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', width: '100%' }}><div style={{ padding: '24px', margin: '100px auto', maxWidth: '1200px', width: '100%' }}>
+            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', width: '100%' }}><div style={{ padding: '24px', margin: '100px auto', maxWidth: '1560px', width: '94%' }}>
               <Skeleton active avatar paragraph={{ rows: 4 }} />
             </div></div>}>
               <Routes>

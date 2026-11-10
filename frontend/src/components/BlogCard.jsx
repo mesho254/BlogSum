@@ -925,7 +925,7 @@ const BlogCard = ({ blog, onTagClick }) => {
           display: flex;
           flex-direction: column;
           height: 100%;
-          max-width: 410px;
+          max-width: 100%;
           width: 100%;
           transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.28s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease;
           position: relative;

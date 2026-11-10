@@ -50,6 +50,7 @@ html, body {
 .modern-navbar-inner {
   pointer-events: auto;
   max-width: 1280px;
+  width: 100%;
   margin: 0 auto;
   height: 64px;
   padding: 0 20px;
@@ -64,6 +65,18 @@ html, body {
   box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.08),
               0 4px 12px -2px rgba(15, 23, 42, 0.04);
   transition: all 0.25s ease;
+}
+
+@media (min-width: 1536px) {
+  .modern-navbar-inner {
+    max-width: 1560px;
+  }
+}
+
+@media (min-width: 1920px) {
+  .modern-navbar-inner {
+    max-width: 1720px;
+  }
 }
 
 .modern-navbar.scrolled .modern-navbar-inner {

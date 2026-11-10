@@ -449,8 +449,8 @@ const BlogList = () => {
       {isLoading ? (
         <div style={{ padding: '40px 0', width: '100%' }}>
           <Row gutter={[24, 24]}>
-            {[1, 2, 3].map((n) => (
-              <Col xs={24} sm={12} md={8} key={n}>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+              <Col xs={24} sm={12} md={12} lg={8} xl={6} key={n}>
                 <div
                   style={{
                     background: '#fff',
@@ -497,10 +497,11 @@ const BlogList = () => {
                 <Col
                   xs={24}
                   sm={12}
-                  md={8}
+                  md={12}
                   lg={8}
+                  xl={6}
                   key={blog._id}
-                  style={{ minWidth: '330px', display: 'flex' }}
+                  style={{ display: 'flex' }}
                 >
                   <BlogCard blog={blog} onTagClick={handleTagSelect} />
                 </Col>
@@ -554,6 +555,18 @@ const BlogList = () => {
           width: 94%;
           margin: 20px auto 56px;
           padding: 8px 0;
+          transition: max-width 0.2s ease;
+        }
+        @media (min-width: 1536px) {
+          .bloglist-section {
+            max-width: 1560px;
+          }
+        }
+        @media (min-width: 1920px) {
+          .bloglist-section {
+            max-width: 1720px;
+            width: 95%;
+          }
         }
         .bloglist-ed-header {
           display: flex;

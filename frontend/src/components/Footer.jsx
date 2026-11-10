@@ -97,6 +97,18 @@ function CustomFooter() {
           max-width: 1280px;
           margin: 0 auto;
           padding: 64px 28px 36px;
+          transition: max-width 0.2s ease;
+        }
+        @media (min-width: 1536px) {
+          .ed-footer-inner {
+            max-width: 1560px;
+          }
+        }
+        @media (min-width: 1920px) {
+          .ed-footer-inner {
+            max-width: 1720px;
+            width: 95%;
+          }
         }
 
         .ed-footer-grid {

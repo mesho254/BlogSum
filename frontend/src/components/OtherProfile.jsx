@@ -185,10 +185,11 @@ const OtherProfile = () => {
           <Col
             xs={24}
             sm={12}
-            md={8}
+            md={12}
             lg={8}
+            xl={6}
             key={blog._id}
-            style={{ minWidth: '320px', display: 'flex' }}
+            style={{ display: 'flex' }}
           >
             <BlogCard blog={blog} />
           </Col>
@@ -216,7 +217,7 @@ const OtherProfile = () => {
     return (
       <Row gutter={[16, 16]}>
         {peopleList.map((person) => (
-          <Col xs={24} sm={12} md={8} key={person._id}>
+          <Col xs={24} sm={12} md={8} lg={6} xl={6} key={person._id}>
             <AuthorHoverCard author={person}>
               <Link
                 to={`/profile/${person._id}`}
@@ -307,7 +308,7 @@ const OtherProfile = () => {
   return (
     <div style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '60px' }}>
       <Navbar />
-      <div style={{ maxWidth: '1240px', width: '94%', margin: '0 auto', paddingTop: '100px' }}>
+      <div className="ed-profile-container">
         <Button
           type="text"
           icon={<ArrowLeftOutlined />}
@@ -709,6 +710,27 @@ const OtherProfile = () => {
             to {
               opacity: 1;
               transform: translateY(0);
+            }
+          }
+
+          /* Responsive Wide Container for 23" / 27" Monitors */
+          .ed-profile-container {
+            width: 94%;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding-top: 100px;
+            transition: max-width 0.2s ease;
+          }
+          @media (min-width: 1536px) {
+            .ed-profile-container {
+              max-width: 1560px;
+              width: 94%;
+            }
+          }
+          @media (min-width: 1920px) {
+            .ed-profile-container {
+              max-width: 1720px;
+              width: 95%;
             }
           }
         `}</style>

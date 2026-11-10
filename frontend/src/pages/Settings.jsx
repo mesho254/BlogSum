@@ -666,6 +666,19 @@ function Settings() {
           width: 92%;
           margin: 0 auto;
           padding-top: 112px;
+          transition: max-width 0.2s ease;
+        }
+        @media (min-width: 1536px) {
+          .ed-settings-shell {
+            max-width: 1440px;
+            width: 94%;
+          }
+        }
+        @media (min-width: 1920px) {
+          .ed-settings-shell {
+            max-width: 1640px;
+            width: 95%;
+          }
         }
         .ed-settings-header {
           display: flex;
@@ -725,6 +738,18 @@ function Settings() {
           grid-template-columns: 260px minmax(0, 1fr);
           gap: 32px;
           align-items: start;
+        }
+        @media (min-width: 1536px) {
+          .ed-settings-grid {
+            grid-template-columns: 280px minmax(0, 1fr);
+            gap: 40px;
+          }
+        }
+        @media (min-width: 1920px) {
+          .ed-settings-grid {
+            grid-template-columns: 320px minmax(0, 1fr);
+            gap: 48px;
+          }
         }
         @media (max-width: 860px) {
           .ed-settings-grid {

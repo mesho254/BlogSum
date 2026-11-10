@@ -236,6 +236,17 @@ function Careers() {
             max-width: 1180px;
             margin: 0 auto;
             padding: 80px 24px 40px;
+            transition: max-width 0.2s ease;
+          }
+          @media (min-width: 1536px) {
+            .ed-careers-section {
+              max-width: 1440px;
+            }
+          }
+          @media (min-width: 1920px) {
+            .ed-careers-section {
+              max-width: 1600px;
+            }
           }
 
           .ed-careers-section-header {

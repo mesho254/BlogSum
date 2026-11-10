@@ -86,20 +86,7 @@ const Banner = () => {
 
   if (isLoading) {
     return (
-      <div
-        style={{
-          maxWidth: '1280px',
-          width: '94%',
-          height: '460px',
-          margin: '0 auto 24px',
-          background: '#f8fafc',
-          borderRadius: '24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: '1px solid #e2e8f0',
-        }}
-      >
+      <div className="modern-hero-banner-skeleton">
         <Skeleton active paragraph={{ rows: 4 }} style={{ width: '80%' }} />
       </div>
     );
@@ -230,7 +217,8 @@ const Banner = () => {
       </div>
 
       <style>{`
-        .modern-hero-banner {
+        .modern-hero-banner,
+        .modern-hero-banner-skeleton {
           position: relative;
           max-width: 1280px;
           width: 94%;
@@ -240,6 +228,30 @@ const Banner = () => {
           overflow: hidden;
           box-shadow: 0 24px 48px -14px rgba(15, 23, 42, 0.22);
           background: #0f172a;
+          transition: max-width 0.2s ease;
+        }
+        .modern-hero-banner-skeleton {
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: none;
+        }
+        @media (min-width: 1536px) {
+          .modern-hero-banner,
+          .modern-hero-banner-skeleton {
+            max-width: 1560px;
+            height: 520px;
+          }
+        }
+        @media (min-width: 1920px) {
+          .modern-hero-banner,
+          .modern-hero-banner-skeleton {
+            max-width: 1720px;
+            height: 560px;
+            width: 95%;
+          }
         }
         .modern-hero-banner__image {
           width: 100%;

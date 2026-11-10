@@ -93,6 +93,17 @@ function About() {
           max-width: 1180px;
           margin: 0 auto;
           padding: 0 24px;
+          transition: max-width 0.2s ease;
+        }
+        @media (min-width: 1536px) {
+          .ed-about-container {
+            max-width: 1440px;
+          }
+        }
+        @media (min-width: 1920px) {
+          .ed-about-container {
+            max-width: 1600px;
+          }
         }
 
         /* Editorial Hero Section */
