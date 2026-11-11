@@ -7,8 +7,8 @@ const {
   sanitizeStoryContent,
   sanitizeCommentContent,
   sanitizePlainText,
-} = require('../utils/sanitizer');
-const { generateAiCopilotInsights } = require('../utils/aiCopilot');
+} = require('../Utils/sanitizer');
+const { generateAiCopilotInsights } = require('../Utils/aiCopilot');
 const { dispatchWebhookEvent } = require('../Utils/webhookDispatcher');
 const { getCached, setCached } = require('../Utils/cacheEngine');
 const cron = require('node-cron');
