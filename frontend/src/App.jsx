@@ -3,6 +3,7 @@ import './App.css';
 import React, { lazy, Suspense } from "react";
 import { Skeleton } from 'antd';
 import { AuthProvider } from './contexts/AuthContext';
+import { SocketProvider } from './contexts/SocketContext';
 import 'antd/dist/reset.css';
 import CustomFooter from './components/Footer';
 import ProtectedRoute from './utils/ProtectedRoute';
@@ -73,6 +74,7 @@ const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'))
 const Help = lazy(() => import('./pages/Help'));
 const Settings = lazy(() => import('./pages/Settings'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const SeriesDetails = lazy(() => import('./pages/SeriesDetails'));
 
 
 
@@ -80,7 +82,8 @@ function App() {
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClient}>
-        <div className="App">
+        <SocketProvider>
+          <div className="App">
           <main className="app-main-content">
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', width: '100%' }}><div style={{ padding: '24px', margin: '100px auto', maxWidth: '1560px', width: '94%' }}>
               <Skeleton active avatar paragraph={{ rows: 4 }} />
@@ -112,6 +115,7 @@ function App() {
                 <Route path='/help' element={<Help/>}/>
                 <Route path='/settings' element={<ProtectedRoute><Settings/></ProtectedRoute>}/>
                 <Route path='/admin' element={<ProtectedRoute><AdminDashboard/></ProtectedRoute>}/>
+                <Route path='/series/:id' element={<SeriesDetails/>}/>
 
                 <Route path='*' element={<ErrorBoundary/>}/>
               </Routes>
@@ -119,6 +123,7 @@ function App() {
           </main>
           <CustomFooter/>
         </div>
+        </SocketProvider>
       </QueryClientProvider>
     </AuthProvider>
   );

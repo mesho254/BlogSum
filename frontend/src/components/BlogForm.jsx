@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import DOMPurify from 'dompurify';
 import {
   Input,
   Upload,
@@ -999,9 +1000,10 @@ const BlogForm = () => {
                   suppressContentEditableWarning
                   onBlur={(e) => setContent(e.currentTarget.innerHTML)}
                   dangerouslySetInnerHTML={{
-                    __html:
+                    __html: DOMPurify.sanitize(
                       content ||
-                      '<p style="color:#9ca3af;">Start writing your story in the editor or click right here to type directly in the preview...</p>',
+                      '<p style="color:#9ca3af;">Start writing your story in the editor or click right here to type directly in the preview...</p>'
+                    ),
                   }}
                   className="studio-preview-prose"
                 />

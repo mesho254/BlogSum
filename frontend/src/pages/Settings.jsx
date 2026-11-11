@@ -6,8 +6,10 @@ import {
   Input,
   Avatar,
   Select,
+  Button,
   message,
   notification,
+  Spin,
 } from 'antd';
 import {
   UserOutlined,
@@ -19,6 +21,11 @@ import {
   EnvironmentOutlined,
   CheckOutlined,
   ArrowRightOutlined,
+  DownloadOutlined,
+  CopyOutlined,
+  KeyOutlined,
+  CheckCircleFilled,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -52,7 +59,7 @@ const loadStoredPrefs = () => {
 };
 
 function Settings() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [profileForm] = Form.useForm();
@@ -64,6 +71,174 @@ function Settings() {
   const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
+  const [exportingData, setExportingData] = useState(false);
+
+  const handleExportMyData = async () => {
+    setExportingData(true);
+    try {
+      const response = await axiosInstance.get('/api/users/export-my-data');
+      const dataStr =
+        'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(response.data, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', dataStr);
+      downloadAnchor.setAttribute(
+        'download',
+        `blogsum-data-export-${user?.username || 'account'}-${Date.now()}.json`
+      );
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      message.success('Your complete account data archive has been downloaded!');
+    } catch (err) {
+      console.error('Error exporting data:', err);
+      message.error('Failed to export account data archive');
+    } finally {
+      setExportingData(false);
+    }
+  };
+
+  const { data: twoFAStatus, refetch: refetch2FA } = useQuery({
+    queryKey: ['2faStatus'],
+    queryFn: async () => (await axiosInstance.get('/api/auth/2fa/status')).data,
+    enabled: Boolean(user),
+  });
+
+  const [is2FASetupModalVisible, setIs2FASetupModalVisible] = useState(false);
+  const [is2FADisableModalVisible, setIs2FADisableModalVisible] = useState(false);
+  const [twoFASetupData, setTwoFASetupData] = useState(null);
+  const [twoFASetupLoading, setTwoFASetupLoading] = useState(false);
+  const [twoFAVerifying, setTwoFAVerifying] = useState(false);
+  const [twoFAVerificationCode, setTwoFAVerificationCode] = useState('');
+  const [disablePassword, setDisablePassword] = useState('');
+  const [disableCode, setDisableCode] = useState('');
+  const [disabling2FA, setDisabling2FA] = useState(false);
+
+  const handleOpen2FASetup = async () => {
+    setTwoFASetupLoading(true);
+    setIs2FASetupModalVisible(true);
+    setTwoFAVerificationCode('');
+    try {
+      const res = await axiosInstance.post('/api/auth/2fa/setup');
+      setTwoFASetupData(res.data);
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to initiate 2FA setup');
+      setIs2FASetupModalVisible(false);
+    } finally {
+      setTwoFASetupLoading(false);
+    }
+  };
+
+  const handleVerifyEnable2FA = async () => {
+    const cleanToken = twoFAVerificationCode.trim().replace(/[\s-]/g, '');
+    if (!cleanToken || cleanToken.length < 6) {
+      message.warning('Please enter the 6-digit verification code from your authenticator app');
+      return;
+    }
+    setTwoFAVerifying(true);
+    try {
+      const res = await axiosInstance.post('/api/auth/2fa/verify-enable', {
+        token: cleanToken,
+      });
+      message.success(res.data.message || 'Two-Factor Authentication is now enabled!');
+      setIs2FASetupModalVisible(false);
+      refetch2FA();
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Invalid verification code');
+    } finally {
+      setTwoFAVerifying(false);
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    if (!disablePassword) {
+      message.warning('Please enter your account password to disable 2FA');
+      return;
+    }
+    setDisabling2FA(true);
+    try {
+      const res = await axiosInstance.post('/api/auth/2fa/disable', {
+        password: disablePassword,
+        code: disableCode,
+      });
+      message.success(res.data.message || 'Two-Factor Authentication disabled');
+      setIs2FADisableModalVisible(false);
+      setDisablePassword('');
+      setDisableCode('');
+      refetch2FA();
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to disable 2FA');
+    } finally {
+      setDisabling2FA(false);
+    }
+  };
+
+  // GDPR Account Deletion States & Handlers
+  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const [deletionPreview, setDeletionPreview] = useState(null);
+  const [deletionPreviewLoading, setDeletionPreviewLoading] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [delete2FACode, setDelete2FACode] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
+
+  const handleOpenDeleteModal = async () => {
+    setIsDeleteModalVisible(true);
+    setDeletionPreviewLoading(true);
+    setDeleteConfirmation('');
+    setDeletePassword('');
+    setDelete2FACode('');
+    try {
+      const res = await axiosInstance.get('/api/users/me/deletion-preview');
+      setDeletionPreview(res.data);
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to load account deletion summary');
+    } finally {
+      setDeletionPreviewLoading(false);
+    }
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    if (deleteConfirmation !== 'DELETE') {
+      message.warning('Please type DELETE in all capital letters to confirm');
+      return;
+    }
+    if (!deletePassword) {
+      message.warning('Please enter your account password');
+      return;
+    }
+    if (deletionPreview?.twoFactorEnabled && !delete2FACode) {
+      message.warning('Please enter your 6-digit authenticator or recovery backup code');
+      return;
+    }
+
+    setDeletingAccount(true);
+    try {
+      const res = await axiosInstance.delete('/api/users/me', {
+        data: {
+          confirmation: deleteConfirmation,
+          password: deletePassword,
+          code: delete2FACode,
+        },
+      });
+
+      notification.success({
+        message: 'Account Deleted',
+        description: res.data?.message || 'Your account and personal data have been permanently erased.',
+      });
+
+      setIsDeleteModalVisible(false);
+      if (logout) {
+        await logout();
+      } else {
+        localStorage.removeItem('userInfo');
+      }
+      navigate('/register');
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to delete account. Please verify credentials.');
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
 
   const { data: profileData } = useQuery({
     queryKey: ['userProfile'],
@@ -461,15 +636,126 @@ function Settings() {
 
                 <div className="ed-settings-row">
                   <div className="ed-settings-row__info">
-                    <span className="ed-settings-row__label">Two-Factor Verification</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span className="ed-settings-row__label">Two-Factor Authentication (TOTP / Authenticator App)</span>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          background: twoFAStatus?.twoFactorEnabled ? '#dcfce7' : '#f1f5f9',
+                          color: twoFAStatus?.twoFactorEnabled ? '#15803d' : '#64748b',
+                          border: twoFAStatus?.twoFactorEnabled ? '1px solid #bbf7d0' : '1px solid #e2e8f0',
+                        }}
+                      >
+                        {twoFAStatus?.twoFactorEnabled ? 'Active' : 'Disabled'}
+                      </span>
+                    </div>
                     <span className="ed-settings-row__sub">
-                      Add an extra layer of verification when signing in from a new device.
+                      {twoFAStatus?.twoFactorEnabled
+                        ? `Protected with Google Authenticator, 1Password, or Authy (${twoFAStatus.recoveryCodesCount || 0} recovery codes remaining).`
+                        : 'Secure your administrative authority and author account using time-based one-time passwords (TOTP).'}
                     </span>
                   </div>
-                  <Switch
-                    checked={prefs.twoFactorAuth}
-                    onChange={(v) => updatePref('twoFactorAuth', v)}
-                  />
+                  {twoFAStatus?.twoFactorEnabled ? (
+                    <Button
+                      danger
+                      onClick={() => setIs2FADisableModalVisible(true)}
+                      style={{ borderRadius: 10, fontWeight: 600, height: 38 }}
+                    >
+                      Disable 2FA
+                    </Button>
+                  ) : (
+                    <Button
+                      type="primary"
+                      icon={<SafetyCertificateOutlined />}
+                      onClick={handleOpen2FASetup}
+                      style={{
+                        borderRadius: 10,
+                        fontWeight: 600,
+                        height: 38,
+                        background: '#0f172a',
+                        borderColor: '#0f172a',
+                      }}
+                    >
+                      Enable 2FA
+                    </Button>
+                  )}
+                </div>
+
+                <div className="ed-settings-row">
+                  <div className="ed-settings-row__info">
+                    <span className="ed-settings-row__label">Export My Data Archive (GDPR)</span>
+                    <span className="ed-settings-row__sub">
+                      Download a complete, machine-readable JSON archive of your authored stories, drafts, notifications, and profile data.
+                    </span>
+                  </div>
+                  <Button
+                    icon={<DownloadOutlined />}
+                    onClick={handleExportMyData}
+                    loading={exportingData}
+                    style={{
+                      borderRadius: 10,
+                      fontWeight: 600,
+                      height: 38,
+                    }}
+                  >
+                    Export My Data
+                  </Button>
+                </div>
+
+                <div
+                  className="ed-settings-row"
+                  style={{
+                    background: '#fff1f2',
+                    border: '1px solid #fecdd3',
+                    borderRadius: 14,
+                    padding: '16px 20px',
+                    marginTop: 12,
+                  }}
+                >
+                  <div className="ed-settings-row__info">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span className="ed-settings-row__label" style={{ color: '#be123c', fontWeight: 700 }}>
+                        Delete Account Permanently (GDPR Article 17)
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.7rem',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          textTransform: 'uppercase',
+                          background: '#ffe4e6',
+                          color: '#9f1239',
+                          border: '1px solid #fda4af',
+                        }}
+                      >
+                        Irreversible
+                      </span>
+                    </div>
+                    <span className="ed-settings-row__sub" style={{ color: '#9f1239' }}>
+                      Erase your personal identity, credentials, stories, and series. Discussion comments will be anonymized to protect community context.
+                    </span>
+                  </div>
+                  <Button
+                    danger
+                    type="primary"
+                    icon={<DeleteOutlined />}
+                    onClick={handleOpenDeleteModal}
+                    style={{
+                      borderRadius: 10,
+                      fontWeight: 700,
+                      height: 38,
+                      background: '#e11d48',
+                      borderColor: '#e11d48',
+                    }}
+                  >
+                    Delete Account...
+                  </Button>
                 </div>
               </div>
             </section>
@@ -649,6 +935,471 @@ function Settings() {
             </button>
           </div>
         </Form>
+      </Modal>
+
+      {/* 2FA TOTP Setup Modal */}
+      <Modal
+        title={null}
+        open={is2FASetupModalVisible}
+        onCancel={() => setIs2FASetupModalVisible(false)}
+        footer={null}
+        width={520}
+        centered
+        className="ed-settings-modal"
+      >
+        <div className="ed-smodal-header">
+          <div
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 14,
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 14,
+            }}
+          >
+            <SafetyCertificateOutlined style={{ fontSize: 26, color: '#2563eb' }} />
+          </div>
+          <h3 className="ed-smodal-title">Enable Two-Factor Authentication</h3>
+          <p className="ed-smodal-sub">
+            Protect your administrative control and account with standard time-based verification.
+          </p>
+        </div>
+
+        {twoFASetupLoading ? (
+          <div style={{ textAlign: 'center', padding: '48px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#64748b', fontSize: '0.9rem' }}>
+              Generating secure authenticator key and QR code...
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: '0 8px' }}>
+            {/* Step 1: Scan QR Code */}
+            <div
+              style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 14,
+                padding: '16px',
+                textAlign: 'center',
+                marginBottom: 18,
+              }}
+            >
+              <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#475569', marginBottom: 12 }}>
+                STEP 1: SCAN QR CODE IN AUTHENTICATOR APP
+              </div>
+              {twoFASetupData?.qrCodeDataUrl && (
+                <img
+                  src={twoFASetupData.qrCodeDataUrl}
+                  alt="2FA QR Code"
+                  style={{
+                    width: 170,
+                    height: 170,
+                    borderRadius: 12,
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    padding: 6,
+                  }}
+                />
+              )}
+              <div style={{ marginTop: 10, fontSize: '0.78rem', color: '#64748b' }}>
+                Compatible with Google Authenticator, 1Password, Authy, and Microsoft Authenticator.
+              </div>
+            </div>
+
+            {/* Step 2: Manual Secret Key */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: '#f1f5f9',
+                padding: '8px 12px',
+                borderRadius: 10,
+                fontSize: '0.82rem',
+                marginBottom: 18,
+              }}
+            >
+              <div>
+                <span style={{ color: '#64748b', marginRight: 6 }}>Manual key:</span>
+                <strong style={{ fontFamily: 'monospace', letterSpacing: '0.08em', color: '#0f172a' }}>
+                  {twoFASetupData?.secret}
+                </strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(twoFASetupData?.secret || '');
+                  message.success('Secret key copied to clipboard!');
+                }}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#2563eb',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <CopyOutlined /> Copy
+              </button>
+            </div>
+
+            {/* Step 3: Emergency Backup Recovery Codes */}
+            {twoFASetupData?.recoveryCodes && (
+              <div
+                style={{
+                  background: '#fefce8',
+                  border: '1px solid #fef08a',
+                  borderRadius: 14,
+                  padding: '14px',
+                  marginBottom: 20,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: 8,
+                  }}
+                >
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#854d0e' }}>
+                    <KeyOutlined style={{ marginRight: 6 }} />
+                    EMERGENCY RECOVERY BACKUP CODES
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(twoFASetupData.recoveryCodes.join('\n'));
+                      message.success('All 8 recovery codes copied to clipboard!');
+                    }}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#854d0e',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Copy All
+                  </button>
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '4px 12px',
+                    fontFamily: 'monospace',
+                    fontSize: '0.84rem',
+                    color: '#713f12',
+                    fontWeight: 700,
+                  }}
+                >
+                  {twoFASetupData.recoveryCodes.map((code, idx) => (
+                    <div key={idx}>{code}</div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 8, fontSize: '0.72rem', color: '#a16207' }}>
+                  Save these codes now. Each code can be used once if you lose access to your authenticator app.
+                </div>
+              </div>
+            )}
+
+            {/* Step 4: Verification Code Input */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', marginBottom: 6 }}>
+                STEP 2: ENTER 6-DIGIT CODE FROM AUTHENTICATOR APP
+              </div>
+              <Input
+                placeholder="000 000"
+                maxLength={7}
+                value={twoFAVerificationCode}
+                onChange={(e) => setTwoFAVerificationCode(e.target.value.replace(/[^0-9]/g, ''))}
+                style={{
+                  height: 46,
+                  borderRadius: 12,
+                  fontSize: '1.25rem',
+                  fontWeight: 700,
+                  textAlign: 'center',
+                  letterSpacing: '0.25em',
+                }}
+              />
+            </div>
+
+            <div className="ed-smodal-actions">
+              <button
+                type="button"
+                onClick={() => setIs2FASetupModalVisible(false)}
+                className="ed-smodal-btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleVerifyEnable2FA}
+                disabled={twoFAVerifying || twoFAVerificationCode.length < 6}
+                className="ed-smodal-btn-primary"
+              >
+                {twoFAVerifying ? 'Activating...' : 'Verify & Activate 2FA'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* 2FA Disable Confirmation Modal */}
+      <Modal
+        title={null}
+        open={is2FADisableModalVisible}
+        onCancel={() => setIs2FADisableModalVisible(false)}
+        footer={null}
+        width={440}
+        centered
+        className="ed-settings-modal"
+      >
+        <div className="ed-smodal-header">
+          <h3 className="ed-smodal-title">Disable Two-Factor Authentication</h3>
+          <p className="ed-smodal-sub">
+            Please enter your current account password to confirm disabling 2FA.
+          </p>
+        </div>
+
+        <div style={{ padding: '0 8px' }}>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+              Current Password
+            </label>
+            <Input.Password
+              prefix={<LockOutlined style={{ color: '#9ca3af', marginRight: 6 }} />}
+              placeholder="Enter your account password"
+              value={disablePassword}
+              onChange={(e) => setDisablePassword(e.target.value)}
+              style={{ height: 42, borderRadius: 10 }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+              6-Digit Authenticator or Recovery Code (Optional Extra Security)
+            </label>
+            <Input
+              placeholder="Optional verification code"
+              value={disableCode}
+              onChange={(e) => setDisableCode(e.target.value)}
+              style={{ height: 42, borderRadius: 10 }}
+            />
+          </div>
+
+          <div className="ed-smodal-actions">
+            <button
+              type="button"
+              onClick={() => {
+                setIs2FADisableModalVisible(false);
+                setDisablePassword('');
+                setDisableCode('');
+              }}
+              className="ed-smodal-btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleDisable2FA}
+              disabled={disabling2FA || !disablePassword}
+              style={{
+                padding: '10px 18px',
+                borderRadius: 10,
+                border: 'none',
+                background: '#dc2626',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                cursor: 'pointer',
+              }}
+            >
+              {disabling2FA ? 'Disabling...' : 'Disable 2FA'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* GDPR Article 17 Account Deletion Modal */}
+      <Modal
+        title={null}
+        open={isDeleteModalVisible}
+        onCancel={() => !deletingAccount && setIsDeleteModalVisible(false)}
+        footer={null}
+        width={520}
+        centered
+        className="ed-settings-modal"
+      >
+        <div className="ed-smodal-header">
+          <div
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 14,
+              background: '#ffe4e6',
+              border: '1px solid #fecdd3',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 14,
+            }}
+          >
+            <DeleteOutlined style={{ fontSize: 26, color: '#e11d48' }} />
+          </div>
+          <h3 className="ed-smodal-title" style={{ color: '#9f1239' }}>
+            Delete Account Permanently
+          </h3>
+          <p className="ed-smodal-sub">
+            This action is final and irreversible under GDPR Article 17 (Right to Erasure).
+          </p>
+        </div>
+
+        {deletionPreviewLoading ? (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 14, color: '#64748b', fontSize: '0.9rem' }}>
+              Calculating account records and dependencies...
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: '0 8px' }}>
+            {deletionPreview?.blockedReason ? (
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1px solid #f87171',
+                  borderRadius: 12,
+                  padding: '14px',
+                  color: '#991b1b',
+                  fontSize: '0.88rem',
+                  marginBottom: 16,
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Action Blocked</div>
+                <div>{deletionPreview.blockedReason}</div>
+              </div>
+            ) : (
+              <>
+                {/* Breakdown Summary */}
+                <div
+                  style={{
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 14,
+                    padding: '14px 18px',
+                    fontSize: '0.85rem',
+                    marginBottom: 18,
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+                    The following will happen immediately:
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: '#475569', lineHeight: 1.6 }}>
+                    <li>
+                      <strong>{deletionPreview?.storiesCount || 0} authored story/draft(s)</strong> and{' '}
+                      <strong>{deletionPreview?.seriesCount || 0} series</strong> will be permanently destroyed.
+                    </li>
+                    <li>
+                      <strong>{deletionPreview?.commentsCount || 0} comments & replies</strong> on other stories will be anonymized to <em>"Deleted user"</em>.
+                    </li>
+                    <li>
+                      Your author profile, profile photo, credentials, and notification history will be erased.
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Step 1: Confirmation Word */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                    Type <strong>DELETE</strong> in all caps to confirm:
+                  </label>
+                  <Input
+                    placeholder="DELETE"
+                    value={deleteConfirmation}
+                    onChange={(e) => setDeleteConfirmation(e.target.value)}
+                    style={{ height: 42, borderRadius: 10, fontWeight: 700 }}
+                  />
+                </div>
+
+                {/* Step 2: Password */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                    Enter Account Password:
+                  </label>
+                  <Input.Password
+                    prefix={<LockOutlined style={{ color: '#9ca3af', marginRight: 6 }} />}
+                    placeholder="Enter current password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    style={{ height: 42, borderRadius: 10 }}
+                  />
+                </div>
+
+                {/* Step 3: 2FA Code (if user has 2FA enabled) */}
+                {deletionPreview?.twoFactorEnabled && (
+                  <div style={{ marginBottom: 20 }}>
+                    <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      Two-Factor Verification Code or Backup Recovery Code:
+                    </label>
+                    <Input
+                      prefix={<SafetyCertificateOutlined style={{ color: '#9ca3af', marginRight: 6 }} />}
+                      placeholder="6-digit code or XXXX-XXXX"
+                      value={delete2FACode}
+                      onChange={(e) => setDelete2FACode(e.target.value)}
+                      style={{ height: 42, borderRadius: 10 }}
+                    />
+                  </div>
+                )}
+
+                <div className="ed-smodal-actions">
+                  <button
+                    type="button"
+                    disabled={deletingAccount}
+                    onClick={() => setIsDeleteModalVisible(false)}
+                    className="ed-smodal-btn-secondary"
+                  >
+                    Keep My Account
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      deletingAccount ||
+                      deleteConfirmation !== 'DELETE' ||
+                      !deletePassword ||
+                      (deletionPreview?.twoFactorEnabled && !delete2FACode)
+                    }
+                    onClick={handleConfirmDeleteAccount}
+                    style={{
+                      padding: '10px 18px',
+                      borderRadius: 10,
+                      border: 'none',
+                      background: '#e11d48',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      fontSize: '0.9rem',
+                      cursor:
+                        deleteConfirmation === 'DELETE' && deletePassword ? 'pointer' : 'not-allowed',
+                      opacity: deleteConfirmation === 'DELETE' && deletePassword ? 1 : 0.6,
+                    }}
+                  >
+                    {deletingAccount ? 'Erasing Account...' : 'Permanently Delete Account'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </Modal>
 
       <style>{`

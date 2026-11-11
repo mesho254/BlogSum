@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { Tooltip } from 'antd';
 import { HeartOutlined, HeartFilled } from '@ant-design/icons';
 
 export const LINKEDIN_REACTIONS = [
@@ -115,6 +116,8 @@ const ReactionPicker = ({
   onSelectReaction,
   onToggleDefault,
   size = 'default',
+  className = '',
+  buttonStyle = {},
 }) => {
   const [open, setOpen] = useState(false);
   const [hoveredReaction, setHoveredReaction] = useState(null);
@@ -160,6 +163,7 @@ const ReactionPicker = ({
 
   return (
     <div
+      className={`blog-reaction-picker-wrap ${className}`}
       style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -243,55 +247,83 @@ const ReactionPicker = ({
         </div>
       )}
 
-      {/* Main Trigger Button */}
-      <button
-        type="button"
-        onClick={handleMainButtonClick}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: isCompact ? '6px 12px' : '7px 14px',
-          borderRadius: '999px',
-          border: activeConfig ? `1px solid ${activeConfig.border}` : '1px solid transparent',
-          background: activeConfig ? activeConfig.bg : 'transparent',
-          color: activeConfig ? activeConfig.color : '#64748b',
-          fontWeight: activeConfig ? 700 : 600,
-          fontSize: isCompact ? '13px' : '13.5px',
-          cursor: 'pointer',
-          transition: 'all 0.2s ease',
-          outline: 'none',
-        }}
-        className="blog-reaction-trigger-btn"
+      {/* Main Trigger Button with Tooltip */}
+      <Tooltip
+        title={open ? '' : liked ? `${activeConfig?.label || 'Liked'} (${likesCount})` : 'Like / React'}
+        placement="top"
       >
-        {activeConfig ? (
-          activeConfig.key === 'love' ? (
-            <HeartFilled style={{ color: '#e11d48', fontSize: isCompact ? '15px' : '16px' }} />
+        <button
+          type="button"
+          onClick={handleMainButtonClick}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: isCompact ? '6px 12px' : '7px 14px',
+            borderRadius: '999px',
+            border: activeConfig ? `1px solid ${activeConfig.border}` : '1px solid transparent',
+            background: activeConfig ? activeConfig.bg : 'transparent',
+            color: activeConfig ? activeConfig.color : '#64748b',
+            fontWeight: activeConfig ? 700 : 600,
+            fontSize: isCompact ? '13px' : '13.5px',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            outline: 'none',
+            whiteSpace: 'nowrap',
+            ...buttonStyle,
+          }}
+          className="blog-reaction-trigger-btn"
+          aria-label={activeConfig ? activeConfig.label : 'Like'}
+        >
+          {activeConfig ? (
+            activeConfig.key === 'love' ? (
+              <HeartFilled
+                style={{
+                  color: '#e11d48',
+                  fontSize: isCompact ? '15px' : '16px',
+                  flexShrink: 0,
+                }}
+              />
+            ) : (
+              <span
+                style={{
+                  fontSize: isCompact ? '15px' : '16px',
+                  lineHeight: 1,
+                  flexShrink: 0,
+                }}
+              >
+                {activeConfig.emoji}
+              </span>
+            )
           ) : (
-            <span style={{ fontSize: isCompact ? '15px' : '16px', lineHeight: 1 }}>
-              {activeConfig.emoji}
+            <HeartOutlined
+              style={{
+                fontSize: isCompact ? '15px' : '16px',
+                color: '#64748b',
+                flexShrink: 0,
+              }}
+            />
+          )}
+          <span className="blog-reaction-label">{activeConfig ? activeConfig.label : 'Like'}</span>
+          {likesCount > 0 && (
+            <span
+              className="blog-reaction-count"
+              style={{
+                marginLeft: '2px',
+                padding: '1px 7px',
+                borderRadius: '999px',
+                fontSize: '11.5px',
+                fontWeight: 700,
+                background: activeConfig ? 'rgba(255,255,255,0.85)' : '#f1f5f9',
+                color: activeConfig ? activeConfig.color : '#475569',
+                flexShrink: 0,
+              }}
+            >
+              {likesCount}
             </span>
-          )
-        ) : (
-          <HeartOutlined style={{ fontSize: isCompact ? '15px' : '16px', color: '#64748b' }} />
-        )}
-        <span>{activeConfig ? activeConfig.label : 'Like'}</span>
-        {likesCount > 0 && (
-          <span
-            style={{
-              marginLeft: '2px',
-              padding: '1px 7px',
-              borderRadius: '999px',
-              fontSize: '12px',
-              fontWeight: 700,
-              background: activeConfig ? 'rgba(255,255,255,0.85)' : '#f1f5f9',
-              color: activeConfig ? activeConfig.color : '#475569',
-            }}
-          >
-            {likesCount}
-          </span>
-        )}
-      </button>
+          )}
+        </button>
+      </Tooltip>
 
       <style>{`
         @keyframes blogReactionDockIn {

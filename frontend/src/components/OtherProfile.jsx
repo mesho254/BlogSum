@@ -12,6 +12,8 @@ import {
   TeamOutlined,
   UserOutlined,
   ArrowLeftOutlined,
+  FolderOutlined,
+  ReadOutlined,
 } from '@ant-design/icons';
 import axiosInstance from '../axiosConfig';
 import BlogCard from './BlogCard';
@@ -53,6 +55,14 @@ const OtherProfile = () => {
     queryFn: () => axiosInstance.get(`/api/users/otherLiked/${id}`).then((res) => res.data),
     refetchOnMount: 'always',
   });
+
+  const seriesQuery = useQuery({
+    queryKey: ['otherSeries', id],
+    queryFn: async () => (await axiosInstance.get(`/api/series?author=${id}`)).data,
+    enabled: Boolean(id),
+  });
+
+  const authorSeries = seriesQuery.data || [];
 
   const followStateQuery = useQuery({
     queryKey: ['followState', id],
@@ -266,6 +276,82 @@ const OtherProfile = () => {
         </span>
       ),
       children: renderBlogsGrid(userBlogs, 'No published articles yet.'),
+    },
+    {
+      key: 'series',
+      title: 'Collections',
+      icon: <FolderOutlined />,
+      count: authorSeries.length,
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+          <FolderOutlined /> Collections ({authorSeries.length})
+        </span>
+      ),
+      children: (
+        <div>
+          {authorSeries.length === 0 ? (
+            <div
+              style={{
+                textAlign: 'center',
+                padding: '60px 20px',
+                background: '#ffffff',
+                borderRadius: '16px',
+                border: '1px dashed #cbd5e1',
+              }}
+            >
+              <FolderOutlined style={{ fontSize: 44, color: '#94a3b8', marginBottom: 16 }} />
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+                No Collections or Series Yet
+              </h4>
+              <p style={{ color: '#64748b', maxWidth: 440, margin: '0 auto', fontSize: '0.9rem' }}>
+                This author hasn't published any chaptered series yet.
+              </p>
+            </div>
+          ) : (
+            <Row gutter={[24, 24]}>
+              {authorSeries.map((s) => (
+                <Col xs={24} sm={12} md={12} lg={8} xl={6} key={s._id}>
+                  <div className="ed-series-profile-card">
+                    <div className="ed-series-profile-cover-wrap">
+                      {s.coverImage ? (
+                        <img src={s.coverImage} alt={s.title} className="ed-series-profile-cover" />
+                      ) : (
+                        <div className="ed-series-profile-cover-fallback">
+                          <FolderOutlined style={{ fontSize: 36, color: '#ffffff' }} />
+                        </div>
+                      )}
+                      <span className="ed-series-profile-badge">
+                        {s.storiesCount} {s.storiesCount === 1 ? 'Part' : 'Parts'}
+                      </span>
+                    </div>
+
+                    <div className="ed-series-profile-content">
+                      <h4 className="ed-series-profile-title">{s.title}</h4>
+                      {s.description && (
+                        <p className="ed-series-profile-desc">{s.description}</p>
+                      )}
+                      <div className="ed-series-profile-meta">
+                        <span>{s.totalReadTime}</span>
+                      </div>
+
+                      <div className="ed-series-profile-actions">
+                        <Button
+                          size="small"
+                          icon={<ReadOutlined />}
+                          onClick={() => navigate(`/series/${s.slug || s._id}`)}
+                          style={{ borderRadius: '8px', fontWeight: 600, flex: 1 }}
+                        >
+                          View Collection
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </Col>
+              ))}
+            </Row>
+          )}
+        </div>
+      ),
     },
     {
       key: '2',
@@ -506,6 +592,7 @@ const OtherProfile = () => {
               <div className="ed-profile-stats-ribbon">
                 {[
                   { label: 'Articles', value: userBlogs.length, targetKey: '1' },
+                  { label: 'Series', value: authorSeries.length, targetKey: 'series' },
                   { label: 'Followers', value: profile.followers?.length || 0, targetKey: '4' },
                   { label: 'Following', value: profile.following?.length || 0, targetKey: '3' },
                   { label: 'Likes', value: totalLikesReceived, targetKey: '2' },
@@ -711,6 +798,91 @@ const OtherProfile = () => {
               opacity: 1;
               transform: translateY(0);
             }
+          }
+
+          /* Series Profile Cards */
+          .ed-series-profile-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            height: 100%;
+          }
+          .ed-series-profile-card:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.08);
+            transform: translateY(-2px);
+          }
+          .ed-series-profile-cover-wrap {
+            position: relative;
+            height: 150px;
+            width: 100%;
+            background: #0f172a;
+            overflow: hidden;
+          }
+          .ed-series-profile-cover {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+          }
+          .ed-series-profile-cover-fallback {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+          }
+          .ed-series-profile-badge {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            color: #ffffff;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 9999px;
+            letter-spacing: 0.04em;
+          }
+          .ed-series-profile-content {
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+          }
+          .ed-series-profile-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin: 0 0 6px 0;
+            line-height: 1.35;
+          }
+          .ed-series-profile-desc {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin: 0 0 12px 0;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.45;
+          }
+          .ed-series-profile-meta {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #94a3b8;
+            margin-bottom: 14px;
+          }
+          .ed-series-profile-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: auto;
           }
 
           /* Responsive Wide Container for 23" / 27" Monitors */

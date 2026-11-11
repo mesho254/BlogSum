@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import moment from 'moment';
 import {
   Modal,
   Select,
@@ -10,6 +11,8 @@ import {
   message,
   Empty,
   Spin,
+  Table,
+  Input,
 } from 'antd';
 import {
   DashboardOutlined,
@@ -35,6 +38,7 @@ import {
   SendOutlined,
   MailOutlined,
   SafetyCertificateFilled,
+  SafetyCertificateOutlined,
   ClockCircleOutlined,
   FireOutlined,
   UserAddOutlined,
@@ -46,6 +50,7 @@ import {
   FilePdfOutlined,
   PaperClipOutlined,
   LinkOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/NavBar';
@@ -131,6 +136,44 @@ function AdminDashboard() {
   const [inquirySearch, setInquirySearch] = useState('');
   const [inquiryStatusFilter, setInquiryStatusFilter] = useState('all');
   const [selectedInquiryModal, setSelectedInquiryModal] = useState({ open: false, inquiry: null });
+
+  // Audit Logs State (Governance & Security)
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditSearch, setAuditSearch] = useState('');
+  const [auditFilter, setAuditFilter] = useState('all');
+  const [loadingAudit, setLoadingAudit] = useState(false);
+
+  const fetchAuditLogs = async () => {
+    setLoadingAudit(true);
+    try {
+      const { data } = await axiosInstance.get('/api/admin/audit-logs');
+      setAuditLogs(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error fetching audit logs:', err);
+    } finally {
+      setLoadingAudit(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'audit') {
+      fetchAuditLogs();
+    }
+  }, [activeTab]);
+
+  const filteredAuditLogs = useMemo(() => {
+    return auditLogs.filter((log) => {
+      const matchesFilter = auditFilter === 'all' || log.actionType === auditFilter;
+      const term = auditSearch.trim().toLowerCase();
+      const matchesSearch =
+        !term ||
+        (log.adminUsername || '').toLowerCase().includes(term) ||
+        (log.targetLabel || '').toLowerCase().includes(term) ||
+        (log.actionType || '').toLowerCase().includes(term) ||
+        (log.ipAddress || '').includes(term);
+      return matchesFilter && matchesSearch;
+    });
+  }, [auditLogs, auditFilter, auditSearch]);
 
   // Filters & Modals for Careers (Jobs)
   const [jobModal, setJobModal] = useState({ open: false, isEditing: false, job: null });
@@ -1130,6 +1173,12 @@ function AdminDashboard() {
       badge: subscribers.length,
     },
     { key: 'settings', label: 'Platform Settings', icon: <SettingOutlined /> },
+    {
+      key: 'audit',
+      label: 'Security & Audit Logs',
+      icon: <SafetyCertificateOutlined />,
+      badge: auditLogs.length > 0 ? auditLogs.length : undefined,
+    },
   ];
 
   return (
@@ -4404,6 +4453,138 @@ function AdminDashboard() {
                     </div>
                   </div>
                 </form>
+              </div>
+            )}
+
+            {/* =========================================================
+                TAB 9: SECURITY & AUDIT GOVERNANCE LOGS
+               ========================================================= */}
+            {activeTab === 'audit' && (
+              <div className="ed-admin-panel">
+                <div className="ed-admin-panel-header">
+                  <div>
+                    <h3 className="ed-admin-panel-title">Security & Audit Governance Logs</h3>
+                    <p className="ed-admin-panel-sub">
+                      Immutable trail of all administrative actions, role changes, account suspensions, and platform mutations.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                      type="button"
+                      className="ed-admin-btn ed-admin-btn-outline"
+                      onClick={fetchAuditLogs}
+                      disabled={loadingAudit}
+                    >
+                      <ReloadOutlined spin={loadingAudit} />
+                      <span>Refresh Logs</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter and Search Bar */}
+                <div style={{ display: 'flex', gap: 14, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <Input
+                    placeholder="Search by admin, target, action, or IP address..."
+                    value={auditSearch}
+                    onChange={(e) => setAuditSearch(e.target.value)}
+                    style={{ maxWidth: 360, borderRadius: 10, height: 40 }}
+                    allowClear
+                  />
+                  <Select
+                    value={auditFilter}
+                    onChange={(val) => setAuditFilter(val)}
+                    style={{ width: 200, height: 40 }}
+                    options={[
+                      { label: 'All Actions', value: 'all' },
+                      { label: 'Role Changes', value: 'ROLE_CHANGED' },
+                      { label: 'User Suspensions', value: 'USER_SUSPENDED' },
+                      { label: 'User Activations', value: 'USER_ACTIVATED' },
+                      { label: 'Settings Updates', value: 'SETTINGS_UPDATED' },
+                    ]}
+                  />
+                  <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>
+                    Showing {filteredAuditLogs.length} logged events
+                  </span>
+                </div>
+
+                {/* Audit Logs Table */}
+                <div style={{ background: '#ffffff', borderRadius: 14, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                  <Table
+                    loading={loadingAudit}
+                    dataSource={filteredAuditLogs}
+                    rowKey="_id"
+                    pagination={{ pageSize: 15 }}
+                    columns={[
+                      {
+                        title: 'Timestamp',
+                        dataIndex: 'createdAt',
+                        key: 'createdAt',
+                        render: (val) => (
+                          <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>
+                            {moment(val).format('MMM D, YYYY · HH:mm:ss')}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: 'Action Type',
+                        dataIndex: 'actionType',
+                        key: 'actionType',
+                        render: (type) => {
+                          let color = 'default';
+                          if (type === 'USER_SUSPENDED') color = 'error';
+                          else if (type === 'USER_ACTIVATED') color = 'success';
+                          else if (type === 'ROLE_CHANGED') color = 'purple';
+                          else if (type === 'SETTINGS_UPDATED') color = 'processing';
+                          return (
+                            <Tag color={color} style={{ fontWeight: 700, borderRadius: 6 }}>
+                              {type}
+                            </Tag>
+                          );
+                        },
+                      },
+                      {
+                        title: 'Admin Actor',
+                        key: 'admin',
+                        render: (_, record) => (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Avatar
+                              size={26}
+                              src={record.adminId?.profilePicture}
+                              icon={<UserOutlined />}
+                            />
+                            <span style={{ fontWeight: 600, fontSize: '0.88rem', color: '#0f172a' }}>
+                              {record.adminUsername || record.adminId?.username || 'admin'}
+                            </span>
+                          </div>
+                        ),
+                      },
+                      {
+                        title: 'Target Entity',
+                        key: 'target',
+                        render: (_, record) => (
+                          <div>
+                            <span style={{ fontWeight: 600, color: '#0f172a', display: 'block' }}>
+                              {record.targetLabel || record.targetId || 'Platform'}
+                            </span>
+                            <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                              {record.targetType}
+                            </span>
+                          </div>
+                        ),
+                      },
+                      {
+                        title: 'Network / IP',
+                        dataIndex: 'ipAddress',
+                        key: 'ipAddress',
+                        render: (ip) => (
+                          <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#475569' }}>
+                            {ip || '127.0.0.1'}
+                          </span>
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
               </div>
             )}
           </>

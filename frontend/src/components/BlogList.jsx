@@ -319,7 +319,7 @@ const BlogList = () => {
               type="button"
               onClick={() => {
                 setSearchQuery('');
-                setCurrentPage(1);
+                setVisibleCount(INITIAL_BATCH);
                 searchInputRef.current?.focus();
               }}
               className="bloglist-ed-search__clear"

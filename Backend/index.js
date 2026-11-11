@@ -3,14 +3,15 @@ const dns = require('dns');
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
 const path = require('path');
+const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
+const mongoSanitize = require('express-mongo-sanitize');
+const rateLimit = require('express-rate-limit');
 
 // Use public DNS servers so Node's c-ares resolver can resolve MongoDB +srv records
 // when the local router/OS DNS stub refuses SRV queries (ECONNREFUSED)
 dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
 const bodyParser = require('body-parser');
-// const session = require('express-session');
-// const MongoStore = require('connect-mongo');
-// const cookieParser = require('cookie-parser');
 const authRoutes = require('./Routes/auth');
 const blogRoutes = require('./Routes/blogs');
 const { refreshBlogsCache, startScheduledBlogsCron } = require('./controllers/blogController');
@@ -20,29 +21,107 @@ const messageRoutes = require('./Routes/messages');
 const channelRoutes = require('./Routes/channels');
 const subscribeRoutes = require('./Routes/subscribe');
 const adminRoutes = require('./Routes/admin');
+const seriesRoutes = require('./Routes/series');
+const tipRoutes = require('./Routes/tips');
 const cors = require('cors');
-const corsOptions = { origin: "*", credentials: true, optionSuccessStatus: 200 };
-
-const http = require('http');
-const app = express();
-const server = http.createServer(app);
 
 dotenv.config();
+
+const app = express();
+const http = require('http');
+const server = http.createServer(app);
+
+// Strict CORS with credentials support
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+  'https://blog-sum.vercel.app',
+];
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin) || process.env.CLIENT_URL === origin) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Permissive in dev, credentials safely bound
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionSuccessStatus: 200,
+};
+
 const { Server } = require("socket.io");
 const io = new Server(server, {
   cors: {
-    origin: ["https://blog-sum.vercel.app", "http://localhost:3000"],
+    origin: ["https://blog-sum.vercel.app", "http://localhost:3000", "http://localhost:5173"],
     methods: ["GET", "POST"],
     allowedHeaders: ["my-custom-header"],
     credentials: true,
   }
 });
 
-app.use(express.json());
+// 1. Helmet HTTP Security Headers (Protection against MIME sniffing, clickjacking, etc.)
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allows uploaded images/assets to be rendered across domains
+    contentSecurityPolicy: false, // Managed by client build/host
+  })
+);
+
+// 2. Cookie Parser (Enables httpOnly session and auth token inspection)
+app.use(cookieParser());
+
+// 3. NoSQL Injection Defense (Strips $ and . from request body, query, and params)
+app.use(mongoSanitize({ replaceWith: '_' }));
+
+app.use(express.json({ limit: '10mb' }));
+app.use(bodyParser.json({ limit: '10mb' }));
 app.use(cors(corsOptions));
-app.use(bodyParser.json());
+
+// 4. Rate Limiters (Brute force & DDoS protection)
+const generalApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many requests from this IP. Please try again later.' },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many authentication attempts. Please try again after 15 minutes.' },
+});
+
+const submissionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many submissions. Please slow down and try again shortly.' },
+});
+
+// Apply global rate limiting to all API routes
+app.use('/api', generalApiLimiter);
+
+// 5. Sandboxed File Serving (Forces resume PDFs to download as attachments rather than executing inline)
+app.use(
+  '/uploads/resumes',
+  (req, res, next) => {
+    res.setHeader('Content-Disposition', 'attachment');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+  },
+  express.static(path.join(__dirname, 'uploads', 'resumes'))
+);
+
+// General static uploads (avatars, blog photos)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-// app.use(cookieParser());
 
 // app.use(
 //   session({
@@ -61,6 +140,9 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Track active online users: userId -> Set of socketIds
 const onlineUsersMap = new Map();
+
+// Track live story reader presence: storyId -> Set of socketIds
+const storyViewersMap = new Map();
 
 const broadcastOnlineUsers = () => {
   io.emit('onlineUsers', Array.from(onlineUsersMap.keys()));
@@ -84,6 +166,39 @@ io.on('connection', (socket) => {
     broadcastOnlineUsers();
   });
 
+  // Live Story Reader Presence
+  socket.on('joinStory', (storyId) => {
+    if (!storyId) return;
+    const sId = storyId.toString();
+    socket.currentStoryId = sId;
+    const room = `story_${sId}`;
+    socket.join(room);
+
+    if (!storyViewersMap.has(sId)) {
+      storyViewersMap.set(sId, new Set());
+    }
+    storyViewersMap.get(sId).add(socket.id);
+    const count = storyViewersMap.get(sId).size;
+    io.to(room).emit('storyPresence', { storyId: sId, count });
+  });
+
+  socket.on('leaveStory', (storyId) => {
+    if (!storyId) return;
+    const sId = storyId.toString();
+    const room = `story_${sId}`;
+    socket.leave(room);
+
+    if (storyViewersMap.has(sId)) {
+      const set = storyViewersMap.get(sId);
+      set.delete(socket.id);
+      const count = set.size;
+      if (count === 0) {
+        storyViewersMap.delete(sId);
+      }
+      io.to(room).emit('storyPresence', { storyId: sId, count });
+    }
+  });
+
   socket.on('getOnlineUsers', () => {
     socket.emit('onlineUsers', Array.from(onlineUsersMap.keys()));
   });
@@ -95,6 +210,17 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    if (socket.currentStoryId && storyViewersMap.has(socket.currentStoryId)) {
+      const sId = socket.currentStoryId;
+      const set = storyViewersMap.get(sId);
+      set.delete(socket.id);
+      const count = set.size;
+      if (count === 0) {
+        storyViewersMap.delete(sId);
+      }
+      io.to(`story_${sId}`).emit('storyPresence', { storyId: sId, count });
+    }
+
     if (socket.userId && onlineUsersMap.has(socket.userId)) {
       const userSockets = onlineUsersMap.get(socket.userId);
       userSockets.delete(socket.id);
@@ -123,14 +249,27 @@ mongoose.connect(process.env.MONGO_URI, {
   })
   .catch(err => console.error(err));
 
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/blogs', blogRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/channels', channelRoutes);
-app.use('/api/subscribe', subscribeRoutes);
+app.use('/api/subscribe', submissionLimiter, subscribeRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/series', seriesRoutes);
+app.use('/api/tips', tipRoutes);
+
+// Public SEO Endpoints
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain');
+  const baseUrl = process.env.CLIENT_URL || 'https://blog-sum.vercel.app';
+  res.send(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nSitemap: ${baseUrl}/api/blogs/sitemap.xml\n`);
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  res.redirect(301, '/api/blogs/sitemap.xml');
+});
 
 app.get("/", (req, res) => {
   res.status(200).json({

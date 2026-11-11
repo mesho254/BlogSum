@@ -17,6 +17,8 @@ import {
   Tooltip,
   Empty,
   notification,
+  Popconfirm,
+  Checkbox,
 } from 'antd';
 import {
   UploadOutlined,
@@ -33,6 +35,11 @@ import {
   UserOutlined,
   CameraOutlined,
   ClockCircleOutlined,
+  FolderOutlined,
+  FolderAddOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  ReadOutlined,
 } from '@ant-design/icons';
 import Navbar from '../components/NavBar';
 import useAuth from '../hooks/useAuth';
@@ -48,6 +55,13 @@ function Profile() {
   const [previewImage, setPreviewImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeTabKey, setActiveTabKey] = useState('1');
+  const [seriesModalVisible, setSeriesModalVisible] = useState(false);
+  const [editingSeries, setEditingSeries] = useState(null);
+  const [seriesTitle, setSeriesTitle] = useState('');
+  const [seriesDescription, setSeriesDescription] = useState('');
+  const [seriesCover, setSeriesCover] = useState('');
+  const [selectedStoryIds, setSelectedStoryIds] = useState([]);
+  const [seriesSaving, setSeriesSaving] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -76,6 +90,15 @@ function Profile() {
   const profileQuery = useQuery({
     queryKey: ['userProfile'],
     queryFn: async () => (await axiosInstance.get('/api/users/profile')).data,
+  });
+
+  const seriesQuery = useQuery({
+    queryKey: ['userSeries', user?._id],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get(`/api/series?author=${user?._id}`);
+      return data || [];
+    },
+    enabled: Boolean(user?._id),
   });
 
   if (
@@ -423,6 +446,225 @@ function Profile() {
     );
   };
 
+  const userSeries = seriesQuery.data || [];
+
+  const handleOpenCreateSeries = () => {
+    setEditingSeries(null);
+    setSeriesTitle('');
+    setSeriesDescription('');
+    setSeriesCover('');
+    setSelectedStoryIds([]);
+    setSeriesModalVisible(true);
+  };
+
+  const handleOpenEditSeries = (s) => {
+    setEditingSeries(s);
+    setSeriesTitle(s.title || '');
+    setSeriesDescription(s.description || '');
+    setSeriesCover(s.coverImage || '');
+    setSelectedStoryIds((s.stories || []).map((st) => (st._id || st)));
+    setSeriesModalVisible(true);
+  };
+
+  const handleSaveSeries = async () => {
+    if (!seriesTitle.trim()) {
+      message.error('Please provide a title for the series');
+      return;
+    }
+    setSeriesSaving(true);
+    try {
+      if (editingSeries) {
+        await axiosInstance.put(`/api/series/${editingSeries._id}`, {
+          title: seriesTitle.trim(),
+          description: seriesDescription.trim(),
+          coverImage: seriesCover.trim(),
+          stories: selectedStoryIds,
+        });
+        message.success('Series updated successfully');
+      } else {
+        await axiosInstance.post('/api/series', {
+          title: seriesTitle.trim(),
+          description: seriesDescription.trim(),
+          coverImage: seriesCover.trim(),
+          stories: selectedStoryIds,
+        });
+        message.success('Story collection published successfully');
+      }
+      setSeriesModalVisible(false);
+      queryClient.invalidateQueries({ queryKey: ['userSeries'] });
+      queryClient.invalidateQueries({ queryKey: ['postedBlogs'] });
+    } catch (err) {
+      console.error('Error saving series:', err);
+      message.error(err.response?.data?.message || 'Failed to save series');
+    } finally {
+      setSeriesSaving(false);
+    }
+  };
+
+  const handleDeleteSeries = async (seriesId) => {
+    try {
+      await axiosInstance.delete(`/api/series/${seriesId}`);
+      message.success('Series deleted successfully');
+      queryClient.invalidateQueries({ queryKey: ['userSeries'] });
+    } catch (err) {
+      console.error('Error deleting series:', err);
+      message.error('Failed to delete series');
+    }
+  };
+
+  const handleToggleStoryInSeries = (storyId) => {
+    setSelectedStoryIds((prev) =>
+      prev.includes(storyId) ? prev.filter((id) => id !== storyId) : [...prev, storyId]
+    );
+  };
+
+  const handleMoveStoryOrder = (idx, direction) => {
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= selectedStoryIds.length) return;
+    const updated = [...selectedStoryIds];
+    const temp = updated[idx];
+    updated[idx] = updated[targetIdx];
+    updated[targetIdx] = temp;
+    setSelectedStoryIds(updated);
+  };
+
+  const renderSeriesSection = () => {
+    return (
+      <div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '24px',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
+          <div>
+            <h3 style={{ margin: 0, fontWeight: 800, color: '#0f172a', fontSize: '1.25rem' }}>
+              Story Collections & Series ({userSeries.length})
+            </h3>
+            <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '0.9rem' }}>
+              Group your published articles into structured multi-part reading journeys.
+            </p>
+          </div>
+          <Button
+            type="primary"
+            icon={<FolderAddOutlined />}
+            onClick={handleOpenCreateSeries}
+            style={{
+              borderRadius: '999px',
+              fontWeight: 700,
+              height: '40px',
+              padding: '0 22px',
+              background: '#0f172a',
+              borderColor: '#0f172a',
+            }}
+          >
+            Create Series
+          </Button>
+        </div>
+
+        {userSeries.length === 0 ? (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '60px 20px',
+              background: '#ffffff',
+              borderRadius: '16px',
+              border: '1px dashed #cbd5e1',
+            }}
+          >
+            <FolderOutlined style={{ fontSize: 44, color: '#94a3b8', marginBottom: 16 }} />
+            <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+              No Collections or Series Yet
+            </h4>
+            <p style={{ color: '#64748b', maxWidth: 440, margin: '0 auto 20px', fontSize: '0.9rem' }}>
+              Assemble your related stories into sequential multi-part deep dives with chapter ribbons and reader progression.
+            </p>
+            <Button
+              type="primary"
+              icon={<FolderAddOutlined />}
+              onClick={handleOpenCreateSeries}
+              style={{
+                borderRadius: '999px',
+                fontWeight: 700,
+                background: '#0f172a',
+                borderColor: '#0f172a',
+              }}
+            >
+              Start Your First Series
+            </Button>
+          </div>
+        ) : (
+          <Row gutter={[24, 24]}>
+            {userSeries.map((s) => (
+              <Col xs={24} sm={12} md={12} lg={8} xl={6} key={s._id}>
+                <div className="ed-series-profile-card">
+                  <div className="ed-series-profile-cover-wrap">
+                    {s.coverImage ? (
+                      <img src={s.coverImage} alt={s.title} className="ed-series-profile-cover" />
+                    ) : (
+                      <div className="ed-series-profile-cover-fallback">
+                        <FolderOutlined style={{ fontSize: 36, color: '#ffffff' }} />
+                      </div>
+                    )}
+                    <span className="ed-series-profile-badge">
+                      {s.storiesCount} {s.storiesCount === 1 ? 'Part' : 'Parts'}
+                    </span>
+                  </div>
+
+                  <div className="ed-series-profile-content">
+                    <h4 className="ed-series-profile-title">{s.title}</h4>
+                    {s.description && (
+                      <p className="ed-series-profile-desc">{s.description}</p>
+                    )}
+                    <div className="ed-series-profile-meta">
+                      <span>{s.totalReadTime}</span>
+                    </div>
+
+                    <div className="ed-series-profile-actions">
+                      <Button
+                        size="small"
+                        icon={<ReadOutlined />}
+                        onClick={() => navigate(`/series/${s.slug || s._id}`)}
+                        style={{ borderRadius: '8px', fontWeight: 600, flex: 1 }}
+                      >
+                        View
+                      </Button>
+                      <Button
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => handleOpenEditSeries(s)}
+                        style={{ borderRadius: '8px' }}
+                      />
+                      <Popconfirm
+                        title="Delete this series?"
+                        description="This unlinks chapters but will not delete the stories themselves."
+                        onConfirm={() => handleDeleteSeries(s._id)}
+                        okText="Delete"
+                        cancelText="Cancel"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <Button
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          style={{ borderRadius: '8px' }}
+                        />
+                      </Popconfirm>
+                    </div>
+                  </div>
+                </div>
+              </Col>
+            ))}
+          </Row>
+        )}
+      </div>
+    );
+  };
+
   const tabItems = [
     {
       key: '1',
@@ -513,6 +755,18 @@ function Profile() {
         </span>
       ),
       children: renderScheduledSection(),
+    },
+    {
+      key: 'series',
+      title: 'Series & Collections',
+      icon: <FolderOutlined />,
+      count: userSeries.length,
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+          <FolderOutlined /> Series ({userSeries.length})
+        </span>
+      ),
+      children: renderSeriesSection(),
     },
     {
       key: '2',
@@ -756,6 +1010,7 @@ function Profile() {
               <div className="ed-profile-stats-ribbon">
                 {[
                   { label: 'Articles', value: postedBlogs.length, targetKey: '1' },
+                  { label: 'Series', value: userSeries.length, targetKey: 'series' },
                   { label: 'Followers', value: profileData.followers?.length || 0, targetKey: '5' },
                   { label: 'Following', value: profileData.following?.length || 0, targetKey: '4' },
                   { label: 'Likes', value: totalLikesReceived, targetKey: '3' },
@@ -1047,6 +1302,188 @@ function Profile() {
             >
               {loading ? 'Uploading...' : 'Save Photo'}
             </button>
+          </div>
+        </Modal>
+
+        {/* Modern Editorial Create / Edit Series Modal */}
+        <Modal
+          title={null}
+          open={seriesModalVisible}
+          onCancel={() => setSeriesModalVisible(false)}
+          footer={null}
+          className="ed-profile-modal"
+          centered
+          width={680}
+        >
+          <div className="ed-modal-header">
+            <h3 className="ed-modal-title">
+              {editingSeries ? 'Edit Story Collection' : 'Create New Story Collection'}
+            </h3>
+            <p className="ed-modal-subtitle">
+              Group your stories into a chaptered series with sequential reader navigation.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem', marginBottom: 6, color: '#0f172a' }}>
+                Series Title *
+              </label>
+              <Input
+                placeholder="e.g., Modern Distributed Systems: A 5-Part Deep Dive"
+                value={seriesTitle}
+                onChange={(e) => setSeriesTitle(e.target.value)}
+                style={{ borderRadius: 10, height: 42 }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem', marginBottom: 6, color: '#0f172a' }}>
+                Description (Optional)
+              </label>
+              <Input.TextArea
+                rows={3}
+                placeholder="Brief overview of what readers will learn throughout this multi-part collection..."
+                value={seriesDescription}
+                onChange={(e) => setSeriesDescription(e.target.value)}
+                style={{ borderRadius: 10 }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem', marginBottom: 6, color: '#0f172a' }}>
+                Cover Image URL (Optional)
+              </label>
+              <Input
+                placeholder="https://example.com/cover.jpg"
+                value={seriesCover}
+                onChange={(e) => setSeriesCover(e.target.value)}
+                style={{ borderRadius: 10, height: 42 }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem', marginBottom: 8, color: '#0f172a' }}>
+                Select Chapters from Your Published Stories ({selectedStoryIds.length} selected)
+              </label>
+              <div
+                style={{
+                  maxHeight: 220,
+                  overflowY: 'auto',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 12,
+                  padding: '8px 12px',
+                  background: '#f8fafc',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
+              >
+                {publishedBlogs.length === 0 ? (
+                  <p style={{ color: '#64748b', margin: 0, padding: 8, fontSize: '0.85rem' }}>
+                    You have no published stories yet.
+                  </p>
+                ) : (
+                  publishedBlogs.map((b) => {
+                    const isSelected = selectedStoryIds.includes(b._id);
+                    return (
+                      <div
+                        key={b._id}
+                        onClick={() => handleToggleStoryInSeries(b._id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 10px',
+                          background: isSelected ? '#eef2ff' : '#ffffff',
+                          borderRadius: 8,
+                          border: isSelected ? '1px solid #818cf8' : '1px solid #f1f5f9',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        <Checkbox checked={isSelected} />
+                        <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#0f172a', flex: 1 }}>
+                          {b.title}
+                        </span>
+                        <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                          {b.readTime} min read
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {selectedStoryIds.length > 1 && (
+              <div>
+                <label style={{ display: 'block', fontWeight: 700, fontSize: '0.82rem', marginBottom: 6, color: '#64748b' }}>
+                  Chapter Order (Click arrows to reorder sequence)
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {selectedStoryIds.map((id, idx) => {
+                    const story = publishedBlogs.find((b) => b._id === id);
+                    return (
+                      <div
+                        key={id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 8,
+                          padding: '6px 12px',
+                          fontSize: '0.85rem',
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, color: '#0f172a' }}>
+                          Part {idx + 1}: {story?.title || 'Selected Story'}
+                        </span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <Button
+                            size="small"
+                            icon={<ArrowUpOutlined />}
+                            disabled={idx === 0}
+                            onClick={() => handleMoveStoryOrder(idx, -1)}
+                          />
+                          <Button
+                            size="small"
+                            icon={<ArrowDownOutlined />}
+                            disabled={idx === selectedStoryIds.length - 1}
+                            onClick={() => handleMoveStoryOrder(idx, 1)}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+              <Button
+                onClick={() => setSeriesModalVisible(false)}
+                style={{ borderRadius: 10, height: 40, fontWeight: 600 }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="primary"
+                onClick={handleSaveSeries}
+                loading={seriesSaving}
+                style={{
+                  borderRadius: 10,
+                  height: 40,
+                  fontWeight: 600,
+                  background: '#0f172a',
+                  borderColor: '#0f172a',
+                }}
+              >
+                {editingSeries ? 'Update Series' : 'Publish Series'}
+              </Button>
+            </div>
           </div>
         </Modal>
 
@@ -1379,6 +1816,91 @@ function Profile() {
               opacity: 1;
               transform: translateY(0);
             }
+          }
+
+          /* Series Profile Cards */
+          .ed-series-profile-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            height: 100%;
+          }
+          .ed-series-profile-card:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.08);
+            transform: translateY(-2px);
+          }
+          .ed-series-profile-cover-wrap {
+            position: relative;
+            height: 150px;
+            width: 100%;
+            background: #0f172a;
+            overflow: hidden;
+          }
+          .ed-series-profile-cover {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+          }
+          .ed-series-profile-cover-fallback {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+          }
+          .ed-series-profile-badge {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            color: #ffffff;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 9999px;
+            letter-spacing: 0.04em;
+          }
+          .ed-series-profile-content {
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+          }
+          .ed-series-profile-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #0f172a;
+            margin: 0 0 6px 0;
+            line-height: 1.35;
+          }
+          .ed-series-profile-desc {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin: 0 0 12px 0;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.45;
+          }
+          .ed-series-profile-meta {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #94a3b8;
+            margin-bottom: 14px;
+          }
+          .ed-series-profile-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: auto;
           }
 
           /* Responsive Wide Container for 23" / 27" Monitors */

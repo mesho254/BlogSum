@@ -15,14 +15,26 @@ const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const { data } = await axiosInstance.post('/api/auth/login', { email, password });
+    if (data.requires2FA) {
+      return data;
+    }
     localStorage.setItem('userInfo', JSON.stringify(data));
     setUser(data);
+    return data;
+  };
+
+  const verify2FALogin = async (temp2FAToken, code) => {
+    const { data } = await axiosInstance.post('/api/auth/login/2fa', { temp2FAToken, code });
+    localStorage.setItem('userInfo', JSON.stringify(data));
+    setUser(data);
+    return data;
   };
 
   const register = async (username, email, password) => {
     const { data } = await axiosInstance.post('/api/auth/register', { username, email, password });
     localStorage.setItem('userInfo', JSON.stringify(data));
     setUser(data);
+    return data;
   };
 
  const logout = async () => {
@@ -36,7 +48,7 @@ const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout }}>
+    <AuthContext.Provider value={{ user, login, verify2FALogin, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

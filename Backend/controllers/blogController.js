@@ -2,6 +2,11 @@ const Blog = require('../Models/Blog');
 const User = require('../Models/User');
 const Notification = require('../Models/Notification');
 const { isAdminUser } = require('../MiddleWares/authMiddleWare');
+const {
+  sanitizeStoryContent,
+  sanitizeCommentContent,
+  sanitizePlainText,
+} = require('../utils/sanitizer');
 const cron = require('node-cron');
 const cloudinary = require('../config/cloudinary');
 const multer = require('multer');
@@ -309,15 +314,21 @@ const createBlog = async (req, res) => {
     const effectiveStatus =
       status === 'draft' ? 'draft' : isFuturePublish ? 'scheduled' : 'published';
 
+    const cleanTitle = sanitizePlainText(title);
+    const cleanSubtitle = sanitizePlainText(subtitle || '');
+    const cleanCategory = sanitizePlainText(category || 'Technology');
+    const cleanContent = sanitizeStoryContent(content || '');
+    const cleanTags = parsedTags.map((t) => sanitizePlainText(t)).filter(Boolean);
+
     const blog = new Blog({
-      title,
-      subtitle: subtitle || '',
-      readTime,
-      category,
-      content,
+      title: cleanTitle,
+      subtitle: cleanSubtitle,
+      readTime: Number(readTime) || 3,
+      category: cleanCategory,
+      content: cleanContent,
       imageUrl: primaryImage,
       images: allImages,
-      tags: parsedTags,
+      tags: cleanTags,
       author: req.user._id,
       allowComments:
         allowComments === 'false' ? false : allowComments !== undefined ? Boolean(allowComments) : true,
@@ -380,11 +391,11 @@ const updateBlog = async (req, res) => {
       return res.status(401).json({ message: 'Not authorized' });
     }
 
-    blog.title = title !== undefined ? title : blog.title;
-    if (subtitle !== undefined) blog.subtitle = subtitle;
-    blog.readTime = readTime !== undefined ? readTime : blog.readTime;
-    blog.category = category || blog.category;
-    blog.content = content !== undefined ? content : blog.content;
+    blog.title = title !== undefined ? sanitizePlainText(title) : blog.title;
+    if (subtitle !== undefined) blog.subtitle = sanitizePlainText(subtitle);
+    blog.readTime = readTime !== undefined ? Number(readTime) || blog.readTime : blog.readTime;
+    if (category) blog.category = sanitizePlainText(category);
+    if (content !== undefined) blog.content = sanitizeStoryContent(content);
     if (allowComments !== undefined) {
       blog.allowComments = allowComments === 'false' ? false : Boolean(allowComments);
     }
@@ -398,7 +409,7 @@ const updateBlog = async (req, res) => {
     }
 
     if (req.body.tags !== undefined) {
-      blog.tags = parseStringArrayField(req.body.tags).slice(0, 10);
+      blog.tags = parseStringArrayField(req.body.tags).map((t) => sanitizePlainText(t)).filter(Boolean).slice(0, 10);
     }
 
     const uploadedUrls = extractUploadedUrls(req);
@@ -555,6 +566,22 @@ const likeBlog = async (req, res) => {
     updateBlogInCache(updatedBlog);
     invalidateBlogsCache();
 
+    if (userLiked && blog.author && String(blog.author) !== userStr) {
+      try {
+        const reactionLabel = userReaction ? `${userReaction} reaction` : 'reaction';
+        const notif = await Notification.create({
+          user: blog.author,
+          message: `${user.username || 'A reader'} reacted (${reactionLabel}) to your story "${blog.title || 'Untitled'}"`,
+        });
+        const io = req.app.get('io');
+        if (io) {
+          io.to(String(blog.author)).emit('newNotification', notif);
+        }
+      } catch (notifErr) {
+        console.error('Error creating like notification:', notifErr);
+      }
+    }
+
     res.json({
       ...updatedBlog,
       userLiked,
@@ -648,12 +675,17 @@ const commentOnBlog = async (req, res) => {
     const { comment } = req.body;
     const file = req.file;
 
+    const cleanComment = sanitizeCommentContent(comment);
+    if (!cleanComment && !file) {
+      return res.status(400).json({ message: 'Comment content or attachment is required' });
+    }
+
     const blog = await Blog.findById(id);
     if (!blog) {
       return res.status(404).json({ message: 'Blog not found' });
     }
 
-    const commentData = { user: req.user._id, comment, date: new Date(), likes: [], replies: [] };
+    const commentData = { user: req.user._id, comment: cleanComment, date: new Date(), likes: [], replies: [] };
 
     if (file) {
       commentData.attachment = file.path;
@@ -666,6 +698,22 @@ const commentOnBlog = async (req, res) => {
 
     updateBlogInCache(populatedBlog);
     invalidateBlogsCache();
+
+    if (blog.author && String(blog.author) !== String(req.user._id)) {
+      try {
+        const notif = await Notification.create({
+          user: blog.author,
+          message: `${req.user.username || 'A reader'} commented on your story "${blog.title || 'Untitled'}"`,
+        });
+        const io = req.app.get('io');
+        if (io) {
+          io.to(String(blog.author)).emit('newNotification', notif);
+        }
+      } catch (notifErr) {
+        console.error('Error creating comment notification:', notifErr);
+      }
+    }
+
     res.json(populatedBlog.comments);
   } catch (error) {
     console.error('Error commenting on blog:', error);
@@ -678,7 +726,8 @@ const replyToComment = async (req, res) => {
     const { id, commentId } = req.params;
     const { comment } = req.body;
 
-    if (!comment || !comment.trim()) {
+    const cleanReply = sanitizeCommentContent(comment);
+    if (!cleanReply) {
       return res.status(400).json({ message: 'Reply text is required' });
     }
 
@@ -698,7 +747,7 @@ const replyToComment = async (req, res) => {
 
     targetComment.replies.push({
       user: req.user._id,
-      comment: comment.trim(),
+      comment: cleanReply,
       date: new Date(),
       likes: [],
     });
@@ -708,6 +757,22 @@ const replyToComment = async (req, res) => {
 
     updateBlogInCache(populatedBlog);
     invalidateBlogsCache();
+
+    if (targetComment.user && String(targetComment.user) !== String(req.user._id)) {
+      try {
+        const notif = await Notification.create({
+          user: targetComment.user,
+          message: `${req.user.username || 'A reader'} replied to your comment on "${blog.title || 'Untitled'}"`,
+        });
+        const io = req.app.get('io');
+        if (io) {
+          io.to(String(targetComment.user)).emit('newNotification', notif);
+        }
+      } catch (notifErr) {
+        console.error('Error creating reply notification:', notifErr);
+      }
+    }
+
     res.json(populatedBlog.comments);
   } catch (error) {
     console.error('Error replying to comment:', error);
@@ -757,6 +822,22 @@ const likeComment = async (req, res) => {
 
     updateBlogInCache(populatedBlog);
     invalidateBlogsCache();
+
+    if (targetComment.user && String(targetComment.user) !== String(req.user._id)) {
+      try {
+        const notif = await Notification.create({
+          user: targetComment.user,
+          message: `${req.user.username || 'A reader'} liked your comment on "${blog.title || 'Untitled'}"`,
+        });
+        const io = req.app.get('io');
+        if (io) {
+          io.to(String(targetComment.user)).emit('newNotification', notif);
+        }
+      } catch (notifErr) {
+        console.error('Error creating comment like notification:', notifErr);
+      }
+    }
+
     res.json(populatedBlog.comments);
   } catch (error) {
     console.error('Error liking comment:', error);

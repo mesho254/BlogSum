@@ -1,20 +1,39 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Form, Input, notification } from 'antd';
-import { MailOutlined, LockOutlined, ArrowRightOutlined } from '@ant-design/icons';
+import {
+  MailOutlined,
+  LockOutlined,
+  ArrowRightOutlined,
+  SafetyCertificateOutlined,
+  KeyOutlined,
+  ArrowLeftOutlined,
+} from '@ant-design/icons';
 import useAuth from '../hooks/useAuth';
 import Navbar from './NavBar';
 
 const Login = () => {
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const [step, setStep] = useState('credentials'); // 'credentials' | '2fa'
+  const [twoFAData, setTwoFAData] = useState(null);
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+  const { login, verify2FALogin } = useAuth();
   const navigate = useNavigate();
 
   const submitHandler = async (values) => {
     setLoading(true);
     try {
       const { email, password } = values;
-      await login(email, password);
+      const res = await login(email, password);
+      if (res?.requires2FA) {
+        setTwoFAData(res);
+        setStep('2fa');
+        notification.info({
+          message: 'Two-Factor Authentication Required',
+          description: 'Please enter the 6-digit code from your authenticator app.',
+        });
+        return;
+      }
       notification.success({
         message: 'Welcome back',
         description: 'You have signed in to BlogSum.',
@@ -31,77 +50,228 @@ const Login = () => {
     }
   };
 
+  const submit2FAHandler = async (values) => {
+    setLoading(true);
+    try {
+      const { code } = values;
+      const res = await verify2FALogin(twoFAData?.temp2FAToken, code);
+      if (res?.usedRecoveryCode) {
+        notification.warning({
+          message: 'Emergency Recovery Code Used',
+          description: `You have ${res.remainingRecoveryCodes} recovery backup code(s) remaining.`,
+        });
+      }
+      notification.success({
+        message: 'Welcome back',
+        description: 'Two-factor authentication successful.',
+      });
+      navigate('/');
+    } catch (error) {
+      notification.error({
+        message: '2FA Verification Failed',
+        description:
+          error.response?.data?.message ||
+          'Invalid verification code. Please check your authenticator app or try a recovery code.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="ed-auth-page">
       <Navbar />
 
       <main className="ed-auth-container">
         <div className="ed-auth-card">
-          <div className="ed-auth-header">
-            <span className="ed-auth-kicker">BlogSum Editorial</span>
-            <h1 className="ed-auth-title">Welcome back</h1>
-            <p className="ed-auth-subtitle">
-              Sign in with your email and password to publish, bookmark, and join discussions.
-            </p>
-          </div>
+          {step === 'credentials' ? (
+            <>
+              <div className="ed-auth-header">
+                <span className="ed-auth-kicker">BlogSum Editorial</span>
+                <h1 className="ed-auth-title">Welcome back</h1>
+                <p className="ed-auth-subtitle">
+                  Sign in with your email and password to publish, bookmark, and join discussions.
+                </p>
+              </div>
 
-          <Form
-            layout="vertical"
-            onFinish={submitHandler}
-            requiredMark={false}
-            className="ed-auth-form"
-          >
-            <Form.Item
-              name="email"
-              label="Email Address"
-              rules={[
-                { required: true, message: 'Please enter your email address' },
-                { type: 'email', message: 'Please enter a valid email address' },
-              ]}
-            >
-              <Input
-                prefix={<MailOutlined style={{ color: '#9ca3af', marginRight: 6 }} />}
-                placeholder="you@example.com"
-                autoComplete="email"
-                className="ed-auth-input"
-              />
-            </Form.Item>
+              <Form
+                layout="vertical"
+                onFinish={submitHandler}
+                requiredMark={false}
+                className="ed-auth-form"
+              >
+                <Form.Item
+                  name="email"
+                  label="Email Address"
+                  rules={[
+                    { required: true, message: 'Please enter your email address' },
+                    { type: 'email', message: 'Please enter a valid email address' },
+                  ]}
+                >
+                  <Input
+                    prefix={<MailOutlined style={{ color: '#9ca3af', marginRight: 6 }} />}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    className="ed-auth-input"
+                  />
+                </Form.Item>
 
-            <div className="ed-auth-label-row">
-              <span className="ed-auth-field-label">Password</span>
-              <Link to="/forgotPassword" className="ed-auth-forgot-link">
-                Forgot password?
-              </Link>
-            </div>
+                <div className="ed-auth-label-row">
+                  <span className="ed-auth-field-label">Password</span>
+                  <Link to="/forgotPassword" className="ed-auth-forgot-link">
+                    Forgot password?
+                  </Link>
+                </div>
 
-            <Form.Item
-              name="password"
-              rules={[{ required: true, message: 'Please enter your password' }]}
-            >
-              <Input.Password
-                prefix={<LockOutlined style={{ color: '#9ca3af', marginRight: 6 }} />}
-                placeholder="Enter your password"
-                autoComplete="current-password"
-                className="ed-auth-input"
-              />
-            </Form.Item>
+                <Form.Item
+                  name="password"
+                  rules={[{ required: true, message: 'Please enter your password' }]}
+                >
+                  <Input.Password
+                    prefix={<LockOutlined style={{ color: '#9ca3af', marginRight: 6 }} />}
+                    placeholder="Enter your password"
+                    autoComplete="current-password"
+                    className="ed-auth-input"
+                  />
+                </Form.Item>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="ed-auth-submit-btn"
-            >
-              <span>{loading ? 'Signing in...' : 'Sign In'}</span>
-              {!loading && <ArrowRightOutlined style={{ fontSize: 13 }} />}
-            </button>
-          </Form>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="ed-auth-submit-btn"
+                >
+                  <span>{loading ? 'Signing in...' : 'Sign In'}</span>
+                  {!loading && <ArrowRightOutlined style={{ fontSize: 13 }} />}
+                </button>
+              </Form>
 
-          <div className="ed-auth-footer">
-            <span>New to BlogSum?</span>
-            <Link to="/register" className="ed-auth-switch-link">
-              Create an account →
-            </Link>
-          </div>
+              <div className="ed-auth-footer">
+                <span>New to BlogSum?</span>
+                <Link to="/register" className="ed-auth-switch-link">
+                  Create an account →
+                </Link>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="ed-auth-header">
+                <div
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 14,
+                    background: '#eff6ff',
+                    border: '1px solid #bfdbfe',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 16,
+                  }}
+                >
+                  <SafetyCertificateOutlined style={{ fontSize: 26, color: '#2563eb' }} />
+                </div>
+                <h1 className="ed-auth-title">Two-Factor Verification</h1>
+                <p className="ed-auth-subtitle">
+                  {useRecoveryCode
+                    ? `Enter one of your 8-character emergency backup recovery codes for ${twoFAData?.email}.`
+                    : `Enter the 6-digit verification code from Google Authenticator, 1Password, or Authy for ${twoFAData?.email}.`}
+                </p>
+              </div>
+
+              <Form
+                layout="vertical"
+                onFinish={submit2FAHandler}
+                requiredMark={false}
+                className="ed-auth-form"
+              >
+                <Form.Item
+                  name="code"
+                  label={useRecoveryCode ? 'Emergency Recovery Code' : '6-Digit Authenticator Code'}
+                  rules={[
+                    {
+                      required: true,
+                      message: useRecoveryCode
+                        ? 'Please enter your recovery backup code'
+                        : 'Please enter the 6-digit code',
+                    },
+                  ]}
+                >
+                  <Input
+                    prefix={
+                      useRecoveryCode ? (
+                        <KeyOutlined style={{ color: '#9ca3af', marginRight: 6 }} />
+                      ) : (
+                        <SafetyCertificateOutlined style={{ color: '#9ca3af', marginRight: 6 }} />
+                      )
+                    }
+                    placeholder={useRecoveryCode ? 'e.g. A1B2-C3D4' : '000 000'}
+                    maxLength={useRecoveryCode ? 16 : 7}
+                    autoFocus
+                    style={{
+                      letterSpacing: useRecoveryCode ? '0.12em' : '0.25em',
+                      fontSize: '1.25rem',
+                      fontWeight: 700,
+                      textAlign: 'center',
+                    }}
+                    className="ed-auth-input"
+                  />
+                </Form.Item>
+
+                <div style={{ textAlign: 'right', marginBottom: 18 }}>
+                  <button
+                    type="button"
+                    onClick={() => setUseRecoveryCode((prev) => !prev)}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#2563eb',
+                      fontSize: '0.84rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    {useRecoveryCode
+                      ? '← Use 6-Digit Authenticator App Code'
+                      : 'Can’t access authenticator? Use Recovery Code'}
+                  </button>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="ed-auth-submit-btn"
+                >
+                  <span>{loading ? 'Verifying...' : 'Verify & Continue'}</span>
+                  {!loading && <ArrowRightOutlined style={{ fontSize: 13 }} />}
+                </button>
+
+                <div style={{ textAlign: 'center', marginTop: 14 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep('credentials');
+                      setTwoFAData(null);
+                    }}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#64748b',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <ArrowLeftOutlined style={{ fontSize: 11 }} />
+                    Back to email & password
+                  </button>
+                </div>
+              </Form>
+            </>
+          )}
         </div>
       </main>
 

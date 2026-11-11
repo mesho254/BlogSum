@@ -11,6 +11,8 @@ const SiteSettings = require('../Models/SiteSettings');
 const Contact = require('../Models/Contact');
 const Job = require('../Models/Job');
 const JobApplication = require('../Models/JobApplication');
+const AuditLog = require('../Models/AuditLog');
+const { logAdminAction } = require('../Utils/auditLogger');
 
 // Configure disk storage for job candidate resumes
 const resumesDir = path.join(__dirname, '../uploads/resumes');
@@ -33,9 +35,29 @@ const resumeStorage = multer.diskStorage({
   },
 });
 
+const ALLOWED_RESUME_EXTS = ['.pdf', '.doc', '.docx', '.rtf', '.txt', '.odt'];
+const ALLOWED_RESUME_MIMES = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+  'application/rtf',
+  'application/x-rtf',
+];
+
 const uploadResume = multer({
   storage: resumeStorage,
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_RESUME_EXTS.includes(ext)) {
+      return cb(new Error('Invalid file type. Only PDF, DOC, DOCX, RTF, and TXT documents are permitted.'));
+    }
+    if (!ALLOWED_RESUME_MIMES.includes(file.mimetype)) {
+      return cb(new Error('Invalid document MIME type detected.'));
+    }
+    cb(null, true);
+  },
 });
 const { invalidateAuthUserCache } = require('../MiddleWares/authMiddleWare');
 const {
@@ -106,7 +128,7 @@ const buildAdminDataPayload = async (forceRefreshBlogs = false) => {
       console.error('Admin blogs fetch error:', err.message);
       return [];
     }),
-    User.find()
+    User.find({ username: { $ne: 'deleted-user' } })
       .select('-password')
       .sort({ createdAt: -1, _id: -1 })
       .lean()
@@ -673,6 +695,26 @@ const updateUserAdmin = async (req, res) => {
     await user.save();
     invalidateAuthUserCache(user._id);
 
+    if (roles !== undefined) {
+      logAdminAction({
+        req,
+        actionType: 'ROLE_CHANGED',
+        targetType: 'User',
+        targetId: user._id,
+        targetLabel: user.username,
+        details: { newRole: roles },
+      });
+    }
+    if (typeof isSuspended === 'boolean') {
+      logAdminAction({
+        req,
+        actionType: isSuspended ? 'USER_SUSPENDED' : 'USER_ACTIVATED',
+        targetType: 'User',
+        targetId: user._id,
+        targetLabel: user.username,
+      });
+    }
+
     const updatedObj = user.toObject();
     delete updatedObj.password;
 
@@ -768,7 +810,7 @@ const broadcastAnnouncement = async (req, res) => {
       return res.status(400).json({ message: 'Announcement message is required' });
     }
 
-    const filter = {};
+    const filter = { username: { $ne: 'deleted-user' } };
     if (targetRole && targetRole !== 'all') {
       filter.roles = targetRole;
     }
@@ -887,6 +929,13 @@ const updateSiteSettingsAdmin = async (req, res) => {
 
     settings.updatedBy = req.user._id;
     await settings.save();
+
+    logAdminAction({
+      req,
+      actionType: 'SETTINGS_UPDATED',
+      targetType: 'SiteSettings',
+      targetLabel: 'Global Site Settings',
+    });
 
     res.json(settings);
   } catch (error) {
@@ -1239,6 +1288,21 @@ const deleteJobApplicationAdmin = async (req, res) => {
   }
 };
 
+// GET /api/admin/audit-logs
+const getAuditLogsAdmin = async (req, res) => {
+  try {
+    const logs = await AuditLog.find()
+      .populate('adminId', 'username profilePicture email')
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+    res.json(logs);
+  } catch (error) {
+    console.error('Error fetching audit logs:', error);
+    res.status(500).json({ message: 'Failed to retrieve audit logs' });
+  }
+};
+
 module.exports = {
   uploadResume,
   getAdminOverview,
@@ -1274,4 +1338,5 @@ module.exports = {
   getJobApplicationsAdmin,
   updateJobApplicationStatusAdmin,
   deleteJobApplicationAdmin,
+  getAuditLogsAdmin,
 };

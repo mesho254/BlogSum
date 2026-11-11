@@ -21,8 +21,16 @@ const {
   getLikeStatus,
   getBookmarkStatus,
   getBlogShareCount,
-  getBlockStatus
+  getBlockStatus,
+  exportUserData,
 } = require('../controllers/userController');
+const { getDeletionPreview, deleteMyAccount } = require('../controllers/accountController');
+
+router.get('/export-my-data', protect, exportUserData);
+
+// GDPR Article 17 — self-service account deletion
+router.get('/me/deletion-preview', protect, getDeletionPreview);
+router.delete('/me', protect, deleteMyAccount);
 
 router.route('/profile')
   .get(protect, getUserProfile)

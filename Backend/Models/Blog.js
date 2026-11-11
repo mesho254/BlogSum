@@ -50,6 +50,8 @@ const blogSchema = new mongoose.Schema({
   ],
   bookmarks: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }] ,
   shares: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  series: { type: mongoose.Schema.Types.ObjectId, ref: 'Series' },
+  seriesOrder: { type: Number, default: 0 },
   allowComments: { type: Boolean, default: true },
   isFeatured: { type: Boolean, default: false },
   isPinned: { type: Boolean, default: false },
@@ -73,6 +75,10 @@ const blogSchema = new mongoose.Schema({
 });
 
 blogSchema.index({ date: -1 });
+blogSchema.index({ publishDate: -1, status: 1 });
 blogSchema.index({ author: 1, date: -1 });
+blogSchema.index({ author: 1, status: 1 });
+blogSchema.index({ category: 1, status: 1 });
+blogSchema.index({ title: 'text', subtitle: 'text', tags: 'text' });
 
 module.exports = mongoose.model('Blog', blogSchema);

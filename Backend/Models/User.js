@@ -17,6 +17,12 @@ const userSchema = new mongoose.Schema({
   roles: { type: String, default: 'other' },
   isVerified: { type: Boolean, default: false },
   isSuspended: { type: Boolean, default: false },
+  twoFactorEnabled: { type: Boolean, default: false },
+  twoFactorSecret: { type: String, default: null },
+  twoFactorTempSecret: { type: String, default: null },
+  twoFactorRecoveryCodes: [{ type: String }],
+  loginAttempts: { type: Number, default: 0 },
+  lockUntil: { type: Date },
   bio: { type: String, default: '' },
   blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
 }, {

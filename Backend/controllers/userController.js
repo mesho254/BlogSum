@@ -119,6 +119,15 @@ const followUser = async (req, res) => {
     });
 
     await notification.save();
+
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to(String(targetUser._id)).emit('newNotification', notification);
+      }
+    } catch (notifErr) {
+      console.error('Error emitting follow notification:', notifErr);
+    }
   }
 
   res.json(user);
@@ -357,7 +366,43 @@ const getPublicAuthorProfile = async (req, res) => {
   }
 };
 
+// GET /api/users/export-my-data (GDPR compliance export)
+const exportUserData = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const [userProfile, blogs, notifications] = await Promise.all([
+      User.findById(userId).select('-password').lean(),
+      Blog.find({ author: userId }).lean(),
+      Notification.find({ user: userId }).lean(),
+    ]);
+
+    const exportBundle = {
+      exportMetadata: {
+        platform: 'BlogSum Independent Publishing Platform',
+        exportedAt: new Date().toISOString(),
+        formatVersion: '1.0',
+        accountOwner: userProfile.username,
+        email: userProfile.email,
+      },
+      account: userProfile,
+      storiesAuthored: blogs,
+      notificationsHistory: notifications,
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="blogsum-data-export-${userProfile.username}-${Date.now()}.json"`
+    );
+    return res.status(200).json(exportBundle);
+  } catch (error) {
+    console.error('Error exporting user data:', error);
+    res.status(500).json({ message: 'Failed to generate data archive' });
+  }
+};
+
 module.exports = {
+  exportUserData,
   getUserProfile,
   getOtherUserProfile,
   getPublicAuthorProfile,

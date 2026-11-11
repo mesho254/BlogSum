@@ -36,12 +36,23 @@ const {
   getJobApplicationsAdmin,
   updateJobApplicationStatusAdmin,
   deleteJobApplicationAdmin,
+  getAuditLogsAdmin,
 } = require('../controllers/adminController');
 
 // Public endpoints
 router.get('/public-settings', getPublicSiteSettings);
 router.get('/jobs', getPublicJobs);
-router.post('/jobs/apply', uploadResume.single('resume'), submitJobApplication);
+
+const handleResumeUpload = (req, res, next) => {
+  uploadResume.single('resume')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'File upload error' });
+    }
+    next();
+  });
+};
+
+router.post('/jobs/apply', handleResumeUpload, submitJobApplication);
 
 // Admin-only overview
 router.get('/overview', protect, admin, getAdminOverview);
@@ -92,5 +103,8 @@ router.delete('/channels/:id', protect, admin, deleteChannelAdmin);
 // Global Platform Settings
 router.get('/settings', protect, admin, getSiteSettingsAdmin);
 router.put('/settings', protect, admin, updateSiteSettingsAdmin);
+
+// Security & Audit Governance
+router.get('/audit-logs', protect, admin, getAuditLogsAdmin);
 
 module.exports = router;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Avatar, Tooltip, Button, Popover, message } from 'antd';
+import { Avatar, Tooltip, Button, Popover, Dropdown, message } from 'antd';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ClockCircleOutlined,
@@ -20,6 +20,7 @@ import {
   PictureOutlined,
   StarFilled,
   CheckCircleFilled,
+  MoreOutlined,
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -718,11 +719,12 @@ const BlogCard = ({ blog, onTagClick }) => {
                 >
                   <Avatar
                     src={blog.author?.profilePicture}
-                    size={40}
+                    size={36}
                     style={{
                       backgroundColor: '#4f46e5',
                       fontWeight: 700,
                       border: '2px solid #eef2ff',
+                      flexShrink: 0,
                     }}
                   >
                     {blog.author?.username?.[0]?.toUpperCase()}
@@ -738,6 +740,7 @@ const BlogCard = ({ blog, onTagClick }) => {
                   <Link
                     to={`/profile/${blog.author?._id}`}
                     className="modern-blog-card__author-name"
+                    title={isAuthor ? 'You' : blog.author?.username || 'Author'}
                   >
                     {isAuthor ? 'You' : blog.author?.username || 'Author'}
                     {blog.author?.isVerified && (
@@ -754,7 +757,7 @@ const BlogCard = ({ blog, onTagClick }) => {
               </div>
             </div>
 
-            {/* Follow Button OR Author Edit/Delete Actions */}
+            {/* Follow Button OR Author / Admin Actions */}
             <div className="modern-blog-card__author-actions">
               {!isAuthor && user && authorId && (
                 <button
@@ -763,22 +766,26 @@ const BlogCard = ({ blog, onTagClick }) => {
                   className={`modern-blog-card__follow-btn ${
                     isFollowing ? 'is-following' : ''
                   }`}
+                  title={isFollowing ? 'Following' : 'Follow author'}
                 >
                   {isFollowing ? (
                     <>
-                      <CheckOutlined style={{ fontSize: '11px' }} /> Following
+                      <CheckOutlined style={{ fontSize: '11px', flexShrink: 0 }} />
+                      <span className="modern-blog-card__follow-text">Following</span>
                     </>
                   ) : (
                     <>
-                      <UserAddOutlined style={{ fontSize: '11px' }} /> Follow
+                      <UserAddOutlined style={{ fontSize: '11px', flexShrink: 0 }} />
+                      <span className="modern-blog-card__follow-text">Follow</span>
                     </>
                   )}
                 </button>
               )}
 
-              {canManage && (
+              {/* If Author viewing their own post -> Direct Edit / Delete buttons */}
+              {isAuthor && (
                 <div className="modern-blog-card__owner-btns">
-                  <Tooltip title={isAuthor ? 'Edit Article' : 'Edit Article (Admin)'}>
+                  <Tooltip title="Edit Article">
                     <button
                       type="button"
                       onClick={handleEditSubmit}
@@ -788,7 +795,7 @@ const BlogCard = ({ blog, onTagClick }) => {
                       <EditOutlined />
                     </button>
                   </Tooltip>
-                  <Tooltip title={isAuthor ? 'Delete Article' : 'Delete Article (Admin)'}>
+                  <Tooltip title="Delete Article">
                     <button
                       type="button"
                       onClick={handleDelete}
@@ -799,6 +806,41 @@ const BlogCard = ({ blog, onTagClick }) => {
                     </button>
                   </Tooltip>
                 </div>
+              )}
+
+              {/* If Admin viewing another author's post -> Sleek Dropdown so author name is never squished */}
+              {!isAuthor && isAdmin && (
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'edit',
+                        label: 'Edit Story (Admin)',
+                        icon: <EditOutlined style={{ color: '#6366f1' }} />,
+                        onClick: handleEditSubmit,
+                      },
+                      {
+                        key: 'delete',
+                        label: 'Delete Story (Admin)',
+                        icon: <DeleteOutlined style={{ color: '#ef4444' }} />,
+                        danger: true,
+                        onClick: handleDelete,
+                      },
+                    ],
+                  }}
+                  trigger={['click']}
+                  placement="bottomRight"
+                >
+                  <Tooltip title="Admin Management">
+                    <button
+                      type="button"
+                      className="modern-blog-card__icon-btn is-admin-more"
+                      aria-label="Admin options"
+                    >
+                      <MoreOutlined />
+                    </button>
+                  </Tooltip>
+                </Dropdown>
               )}
             </div>
           </div>
@@ -864,19 +906,28 @@ const BlogCard = ({ blog, onTagClick }) => {
               onSelectReaction={(type) => performReactionUpdate(type)}
               onToggleDefault={() => performReactionUpdate(null)}
               size="small"
+              className="modern-blog-card__footer-picker"
+              buttonStyle={{
+                width: '100%',
+                justifyContent: 'center',
+                padding: '6px 8px',
+              }}
             />
 
-            <button
-              type="button"
-              onClick={handleCommentClick}
-              className="modern-blog-card__action-btn"
-            >
-              <CommentOutlined style={{ fontSize: '15px', color: '#6366f1' }} />
-              <span>Comment</span>
-              {totalCommentsCount > 0 && (
-                <span className="modern-blog-card__action-count">{totalCommentsCount}</span>
-              )}
-            </button>
+            <Tooltip title={totalCommentsCount > 0 ? `${totalCommentsCount} comments` : 'Leave a comment'}>
+              <button
+                type="button"
+                onClick={handleCommentClick}
+                className="modern-blog-card__action-btn"
+                aria-label="Comments"
+              >
+                <CommentOutlined style={{ fontSize: '15px', color: '#6366f1', flexShrink: 0 }} />
+                <span className="modern-blog-card__action-label">Comment</span>
+                {totalCommentsCount > 0 && (
+                  <span className="modern-blog-card__action-count">{totalCommentsCount}</span>
+                )}
+              </button>
+            </Tooltip>
 
             <Popover
               content={shareMenuContent}
@@ -889,16 +940,19 @@ const BlogCard = ({ blog, onTagClick }) => {
                 padding: '4px 6px',
               }}
             >
-              <button
-                type="button"
-                className={`modern-blog-card__action-btn ${shared ? 'is-shared' : ''}`}
-              >
-                <ShareAltOutlined style={{ fontSize: '15px' }} />
-                <span>Share</span>
-                {sharesCount > 0 && (
-                  <span className="modern-blog-card__action-count">{sharesCount}</span>
-                )}
-              </button>
+              <Tooltip title={sharesCount > 0 ? `${sharesCount} shares` : 'Share article'}>
+                <button
+                  type="button"
+                  className={`modern-blog-card__action-btn ${shared ? 'is-shared' : ''}`}
+                  aria-label="Share"
+                >
+                  <ShareAltOutlined style={{ fontSize: '15px', flexShrink: 0 }} />
+                  <span className="modern-blog-card__action-label">Share</span>
+                  {sharesCount > 0 && (
+                    <span className="modern-blog-card__action-count">{sharesCount}</span>
+                  )}
+                </button>
+              </Tooltip>
             </Popover>
           </div>
         </div>
@@ -917,6 +971,8 @@ const BlogCard = ({ blog, onTagClick }) => {
 
       <style>{`
         .modern-blog-card {
+          container-type: inline-size;
+          container-name: blogcard;
           background: #ffffff;
           border-radius: 20px;
           border: 1px solid rgba(226, 232, 240, 0.95);
@@ -1055,10 +1111,11 @@ const BlogCard = ({ blog, onTagClick }) => {
           font-weight: 700;
         }
         .modern-blog-card__body {
-          padding: 18px 20px 16px;
+          padding: 16px 16px 14px;
           display: flex;
           flex-direction: column;
           flex: 1;
+          min-width: 0;
         }
         .modern-blog-card__meta {
           display: flex;
@@ -1086,7 +1143,7 @@ const BlogCard = ({ blog, onTagClick }) => {
           text-decoration: none;
         }
         .modern-blog-card__title {
-          font-size: 1.18rem;
+          font-size: 1.15rem;
           font-weight: 800;
           color: #0f172a;
           line-height: 1.38;
@@ -1102,8 +1159,8 @@ const BlogCard = ({ blog, onTagClick }) => {
         }
         .modern-blog-card__excerpt {
           color: #64748b;
-          font-size: 0.9rem;
-          line-height: 1.58;
+          font-size: 0.88rem;
+          line-height: 1.55;
           margin: 0 0 12px;
           display: -webkit-box;
           -webkit-line-clamp: 3;
@@ -1115,14 +1172,14 @@ const BlogCard = ({ blog, onTagClick }) => {
           display: flex;
           align-items: center;
           flex-wrap: wrap;
-          gap: 6px;
+          gap: 5px;
           margin-bottom: 12px;
         }
         .modern-blog-card__tag {
           border: 1px solid #e2e8f0;
           background: #f8fafc;
           color: #475569;
-          padding: 2px 9px;
+          padding: 2px 8px;
           border-radius: 999px;
           font-size: 11px;
           font-weight: 600;
@@ -1143,26 +1200,29 @@ const BlogCard = ({ blog, onTagClick }) => {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 10px;
-          padding: 10px 12px;
+          gap: 8px;
+          padding: 8px 10px;
           background: #f8fafc;
-          border-radius: 14px;
+          border-radius: 12px;
           border: 1px solid #f1f5f9;
-          margin-bottom: 12px;
+          margin-bottom: 10px;
+          min-width: 0;
         }
         .modern-blog-card__author-info {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
           min-width: 0;
+          flex: 1 1 auto;
         }
         .modern-blog-card__author-text {
           display: flex;
           flex-direction: column;
           min-width: 0;
+          flex: 1;
         }
         .modern-blog-card__author-name {
-          font-size: 13.5px;
+          font-size: 13px;
           font-weight: 700;
           color: #0f172a;
           text-decoration: none;
@@ -1170,33 +1230,39 @@ const BlogCard = ({ blog, onTagClick }) => {
           overflow: hidden;
           text-overflow: ellipsis;
           line-height: 1.25;
+          display: block;
         }
         .modern-blog-card__author-name:hover {
           color: #4f46e5;
         }
         .modern-blog-card__author-sub {
-          font-size: 11px;
+          font-size: 10.5px;
           color: #94a3b8;
           font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .modern-blog-card__author-actions {
           display: flex;
           align-items: center;
+          gap: 4px;
           flex-shrink: 0;
         }
         .modern-blog-card__follow-btn {
           display: inline-flex;
           align-items: center;
           gap: 4px;
-          padding: 5px 12px;
+          padding: 4px 10px;
           border-radius: 999px;
-          font-size: 12px;
+          font-size: 11.5px;
           font-weight: 700;
           border: 1px solid #c7d2fe;
           background: #eef2ff;
           color: #4f46e5;
           cursor: pointer;
           transition: all 0.18s ease;
+          white-space: nowrap;
         }
         .modern-blog-card__follow-btn:hover {
           background: #4f46e5;
@@ -1211,20 +1277,21 @@ const BlogCard = ({ blog, onTagClick }) => {
         .modern-blog-card__owner-btns {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 4px;
         }
         .modern-blog-card__icon-btn {
-          width: 32px;
-          height: 32px;
-          border-radius: 10px;
+          width: 30px;
+          height: 30px;
+          border-radius: 8px;
           border: 1px solid #e2e8f0;
           background: #ffffff;
           display: inline-flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          font-size: 14px;
+          font-size: 13px;
           transition: all 0.18s ease;
+          flex-shrink: 0;
         }
         .modern-blog-card__icon-btn.is-edit {
           color: #6366f1;
@@ -1240,24 +1307,37 @@ const BlogCard = ({ blog, onTagClick }) => {
           background: #fef2f2;
           border-color: #fecaca;
         }
+        .modern-blog-card__icon-btn.is-admin-more {
+          color: #64748b;
+        }
+        .modern-blog-card__icon-btn.is-admin-more:hover {
+          background: #f1f5f9;
+          color: #0f172a;
+          border-color: #cbd5e1;
+        }
         .modern-blog-card__social-summary {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 4px 10px;
+          padding: 0 4px 8px;
           border-bottom: 1px solid #f1f5f9;
           margin-bottom: 8px;
           font-size: 11.5px;
           color: #64748b;
+          gap: 6px;
+          min-width: 0;
         }
         .modern-blog-card__reaction-stack {
           display: flex;
           align-items: center;
           gap: 6px;
+          min-width: 0;
+          overflow: hidden;
         }
         .modern-blog-card__reaction-badges {
           display: inline-flex;
           align-items: center;
+          flex-shrink: 0;
         }
         .modern-blog-card__reaction-mini {
           width: 20px;
@@ -1273,11 +1353,16 @@ const BlogCard = ({ blog, onTagClick }) => {
         .modern-blog-card__reaction-total {
           font-weight: 600;
           color: #475569;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .modern-blog-card__summary-right {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
+          flex-shrink: 0;
+          white-space: nowrap;
         }
         .modern-blog-card__summary-link {
           border: none;
@@ -1297,21 +1382,37 @@ const BlogCard = ({ blog, onTagClick }) => {
           align-items: center;
           justify-content: space-between;
           gap: 4px;
-          padding-top: 2px;
+          padding-top: 6px;
+          margin-top: auto;
+          min-width: 0;
+        }
+        .modern-blog-card__footer-picker {
+          flex: 1 1 0;
+          min-width: 0;
+          display: inline-flex;
+        }
+        .modern-blog-card__footer-picker .blog-reaction-trigger-btn {
+          width: 100%;
+          justify-content: center;
+          padding: 6px 8px !important;
         }
         .modern-blog-card__action-btn {
           display: inline-flex;
           align-items: center;
+          justify-content: center;
           gap: 6px;
-          padding: 6px 12px;
+          padding: 6px 8px;
           border-radius: 999px;
           border: 1px solid transparent;
           background: transparent;
           color: #64748b;
-          font-size: 13px;
+          font-size: 12.5px;
           font-weight: 600;
           cursor: pointer;
           transition: all 0.18s ease;
+          flex: 1 1 0;
+          min-width: 0;
+          white-space: nowrap;
         }
         .modern-blog-card__action-btn:hover {
           background: #f8fafc;
@@ -1321,6 +1422,9 @@ const BlogCard = ({ blog, onTagClick }) => {
           color: #059669;
           background: rgba(5, 150, 105, 0.08);
         }
+        .modern-blog-card__action-label {
+          display: inline;
+        }
         .modern-blog-card__action-count {
           padding: 1px 7px;
           border-radius: 999px;
@@ -1328,6 +1432,62 @@ const BlogCard = ({ blog, onTagClick }) => {
           font-weight: 700;
           background: #f1f5f9;
           color: #475569;
+          flex-shrink: 0;
+        }
+
+        /* Container Queries based on the card's actual width */
+        @container blogcard (max-width: 340px) {
+          .modern-blog-card__action-label,
+          .modern-blog-card__footer .blog-reaction-label {
+            display: none !important;
+          }
+          .modern-blog-card__action-btn,
+          .modern-blog-card__footer .blog-reaction-trigger-btn {
+            padding: 5px 6px !important;
+            gap: 4px !important;
+            font-size: 12px !important;
+          }
+          .modern-blog-card__action-count,
+          .modern-blog-card__footer .blog-reaction-count {
+            padding: 1px 5px !important;
+            font-size: 11px !important;
+          }
+          .modern-blog-card__follow-text {
+            display: none !important;
+          }
+          .modern-blog-card__follow-btn {
+            padding: 4px 7px !important;
+          }
+        }
+
+        @container blogcard (max-width: 280px) {
+          .modern-blog-card__author-sub {
+            display: none !important;
+          }
+          .modern-blog-card__action-btn,
+          .modern-blog-card__footer .blog-reaction-trigger-btn {
+            padding: 5px 4px !important;
+            gap: 2px !important;
+          }
+        }
+
+        /* Fallback Media Query for screens where 4 columns are displayed at 1200px-1440px */
+        @media (min-width: 1200px) and (max-width: 1440px) {
+          .modern-blog-card__action-label,
+          .modern-blog-card__footer .blog-reaction-label {
+            display: none;
+          }
+          .modern-blog-card__action-btn,
+          .modern-blog-card__footer .blog-reaction-trigger-btn {
+            padding: 5px 6px !important;
+            gap: 4px !important;
+          }
+          .modern-blog-card__follow-text {
+            display: none;
+          }
+          .modern-blog-card__follow-btn {
+            padding: 4px 7px !important;
+          }
         }
       `}</style>
     </>
