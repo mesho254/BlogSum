@@ -15,11 +15,17 @@ const {
   verifyEnable2FA,
   disable2FA,
   verify2FALogin,
+  getUserSessions,
+  terminateSession,
+  logoutOtherSessions,
+  getUserSecurityLogs,
+  rotateRefreshToken,
 } = require('../controllers/authController');
 
 router.post('/register', registerUser);
 router.post('/login', authUser);
 router.post('/login/2fa', verify2FALogin);
+router.post('/refresh-token', rotateRefreshToken);
 router.get('/allUsers', getAllUsers);
 router.post('/forgot-password1', forgotPassword1);
 
@@ -34,5 +40,13 @@ router.get('/2fa/status', protect, get2FAStatus);
 router.post('/2fa/setup', protect, setup2FA);
 router.post('/2fa/verify-enable', protect, verifyEnable2FA);
 router.post('/2fa/disable', protect, disable2FA);
+
+// Active Sessions & Remote Device Management
+router.get('/sessions', protect, getUserSessions);
+router.delete('/sessions/:sessionId', protect, terminateSession);
+router.post('/sessions/logout-others', protect, logoutOtherSessions);
+
+// User Security Audit Logs
+router.get('/security-logs', protect, getUserSecurityLogs);
 
 module.exports = router;

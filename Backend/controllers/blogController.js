@@ -1,12 +1,16 @@
 const Blog = require('../Models/Blog');
 const User = require('../Models/User');
 const Notification = require('../Models/Notification');
+const BlogRevision = require('../Models/BlogRevision');
 const { isAdminUser } = require('../MiddleWares/authMiddleWare');
 const {
   sanitizeStoryContent,
   sanitizeCommentContent,
   sanitizePlainText,
 } = require('../utils/sanitizer');
+const { generateAiCopilotInsights } = require('../utils/aiCopilot');
+const { dispatchWebhookEvent } = require('../Utils/webhookDispatcher');
+const { getCached, setCached } = require('../Utils/cacheEngine');
 const cron = require('node-cron');
 const cloudinary = require('../config/cloudinary');
 const multer = require('multer');
@@ -317,7 +321,8 @@ const createBlog = async (req, res) => {
     const cleanTitle = sanitizePlainText(title);
     const cleanSubtitle = sanitizePlainText(subtitle || '');
     const cleanCategory = sanitizePlainText(category || 'Technology');
-    const cleanContent = sanitizeStoryContent(content || '');
+    const rawContent = sanitizeStoryContent(content || '');
+    const cleanContent = rawContent && rawContent.trim() ? rawContent : '<p><br></p>';
     const cleanTags = parsedTags.map((t) => sanitizePlainText(t)).filter(Boolean);
 
     const blog = new Blog({
@@ -332,13 +337,39 @@ const createBlog = async (req, res) => {
       author: req.user._id,
       allowComments:
         allowComments === 'false' ? false : allowComments !== undefined ? Boolean(allowComments) : true,
+      isSponsored: req.body.isSponsored === 'true' || req.body.isSponsored === true,
+      sponsorName: req.body.sponsorName ? sanitizePlainText(req.body.sponsorName) : '',
+      accessLevel: req.body.accessLevel || (req.body.isMembersOnly === 'true' || req.body.isMembersOnly === true ? 'members' : 'public'),
+      isMembersOnly: req.body.isMembersOnly === 'true' || req.body.isMembersOnly === true || req.body.accessLevel === 'members',
+      digitalProduct: {
+        enabled: req.body.digitalProductEnabled === 'true' || req.body.digitalProductEnabled === true,
+        name: sanitizePlainText(req.body.digitalProductName || ''),
+        downloadUrl: req.body.digitalProductUrl || '',
+        price: Number(req.body.digitalProductPrice) || 0,
+      },
       date: effectivePublishDate,
       publishDate: effectivePublishDate,
       status: effectiveStatus,
     });
 
     const createdBlog = await blog.save();
+    recordBlogRevision(createdBlog, req.user._id, 'Initial save / publication').catch((err) =>
+      console.error('Error saving initial revision:', err)
+    );
     const populatedCreated = await populateBlogQuery(Blog.findById(createdBlog._id)).lean();
+
+    if (effectiveStatus === 'published') {
+      dispatchWebhookEvent(req.user._id, 'story.published', {
+        id: createdBlog._id,
+        title: createdBlog.title,
+        category: createdBlog.category,
+        readTime: createdBlog.readTime,
+        url: `${process.env.CLIENT_URL || 'https://blog-sum.vercel.app'}/blog/${createdBlog._id}`,
+        status: createdBlog.status,
+        accessLevel: createdBlog.accessLevel,
+        isMembersOnly: createdBlog.isMembersOnly,
+      }).catch(() => {});
+    }
 
     if (effectiveStatus === 'published' && populatedCreated?.author) {
       const followerIds = Array.isArray(populatedCreated.author.followers)
@@ -399,6 +430,25 @@ const updateBlog = async (req, res) => {
     if (allowComments !== undefined) {
       blog.allowComments = allowComments === 'false' ? false : Boolean(allowComments);
     }
+    if (req.body.isSponsored !== undefined) {
+      blog.isSponsored = req.body.isSponsored === 'true' || req.body.isSponsored === true;
+      blog.sponsorName = blog.isSponsored && req.body.sponsorName ? sanitizePlainText(req.body.sponsorName) : '';
+    }
+    if (req.body.accessLevel !== undefined) {
+      blog.accessLevel = req.body.accessLevel;
+      blog.isMembersOnly = req.body.accessLevel === 'members';
+    } else if (req.body.isMembersOnly !== undefined) {
+      blog.isMembersOnly = req.body.isMembersOnly === 'true' || req.body.isMembersOnly === true;
+      blog.accessLevel = blog.isMembersOnly ? 'members' : 'public';
+    }
+    if (req.body.digitalProductEnabled !== undefined) {
+      blog.digitalProduct = {
+        enabled: req.body.digitalProductEnabled === 'true' || req.body.digitalProductEnabled === true,
+        name: sanitizePlainText(req.body.digitalProductName || ''),
+        downloadUrl: req.body.digitalProductUrl || '',
+        price: Number(req.body.digitalProductPrice) || 0,
+      };
+    }
     if (isAdminUser(req.user)) {
       if (req.body.isFeatured !== undefined) {
         blog.isFeatured = req.body.isFeatured === 'false' ? false : Boolean(req.body.isFeatured);
@@ -448,6 +498,17 @@ const updateBlog = async (req, res) => {
     }
 
     const updatedBlog = await blog.save();
+    dispatchWebhookEvent(req.user._id, 'story.updated', {
+      id: updatedBlog._id,
+      title: updatedBlog.title,
+      category: updatedBlog.category,
+      readTime: updatedBlog.readTime,
+      url: `${process.env.CLIENT_URL || 'https://blog-sum.vercel.app'}/blog/${updatedBlog._id}`,
+      status: updatedBlog.status,
+    }).catch(() => {});
+    recordBlogRevision(updatedBlog, req.user._id, 'Story updated').catch((err) =>
+      console.error('Error saving update revision:', err)
+    );
     const populatedUpdated = await populateBlogQuery(Blog.findById(updatedBlog._id)).lean();
     if (populatedUpdated) {
       updateBlogInCache(populatedUpdated);
@@ -669,14 +730,45 @@ const shareBlog = async (req, res) => {
 };
 
 
+const dispatchMentionNotifications = async (text, senderUser, blogTitle, blogId, req) => {
+  if (!text || typeof text !== 'string') return;
+  const mentionMatches = text.match(/@([a-zA-Z0-9_]+)/g);
+  if (!mentionMatches || mentionMatches.length === 0) return;
+
+  const rawUsernames = Array.from(new Set(mentionMatches.map((m) => m.slice(1).toLowerCase())));
+  try {
+    const mentionedUsers = await User.find({
+      username: { $in: rawUsernames.map((u) => new RegExp(`^${u}$`, 'i')) },
+      _id: { $ne: senderUser._id },
+    }).select('_id username');
+
+    if (!mentionedUsers || mentionedUsers.length === 0) return;
+
+    const io = req.app.get('io');
+    for (const targetUser of mentionedUsers) {
+      const notif = await Notification.create({
+        user: targetUser._id,
+        message: `@${senderUser.username || 'Someone'} mentioned you in a discussion on "${blogTitle || 'a story'}"`,
+      });
+      if (io) {
+        io.to(String(targetUser._id)).emit('newNotification', notif);
+      }
+    }
+  } catch (err) {
+    console.warn('Error dispatching mention notifications:', err.message);
+  }
+};
+
 const commentOnBlog = async (req, res) => {
   try {
     const { id } = req.params;
     const { comment } = req.body;
     const file = req.file;
 
+    const attachmentUrl = (req.body.attachment || req.body.imageUrl || file?.path || '').trim();
     const cleanComment = sanitizeCommentContent(comment);
-    if (!cleanComment && !file) {
+
+    if (!cleanComment && !attachmentUrl) {
       return res.status(400).json({ message: 'Comment content or attachment is required' });
     }
 
@@ -685,11 +777,14 @@ const commentOnBlog = async (req, res) => {
       return res.status(404).json({ message: 'Blog not found' });
     }
 
-    const commentData = { user: req.user._id, comment: cleanComment, date: new Date(), likes: [], replies: [] };
-
-    if (file) {
-      commentData.attachment = file.path;
-    }
+    const commentData = {
+      user: req.user._id,
+      comment: cleanComment || '',
+      attachment: attachmentUrl || '',
+      date: new Date(),
+      likes: [],
+      replies: [],
+    };
 
     blog.comments.push(commentData);
 
@@ -714,6 +809,11 @@ const commentOnBlog = async (req, res) => {
       }
     }
 
+    // Trigger @mention notifications
+    if (cleanComment) {
+      dispatchMentionNotifications(cleanComment, req.user, blog.title, blog._id, req);
+    }
+
     res.json(populatedBlog.comments);
   } catch (error) {
     console.error('Error commenting on blog:', error);
@@ -725,10 +825,13 @@ const replyToComment = async (req, res) => {
   try {
     const { id, commentId } = req.params;
     const { comment } = req.body;
+    const file = req.file;
 
+    const attachmentUrl = (req.body.attachment || req.body.imageUrl || file?.path || '').trim();
     const cleanReply = sanitizeCommentContent(comment);
-    if (!cleanReply) {
-      return res.status(400).json({ message: 'Reply text is required' });
+
+    if (!cleanReply && !attachmentUrl) {
+      return res.status(400).json({ message: 'Reply content or attachment is required' });
     }
 
     const blog = await Blog.findById(id);
@@ -747,7 +850,8 @@ const replyToComment = async (req, res) => {
 
     targetComment.replies.push({
       user: req.user._id,
-      comment: cleanReply,
+      comment: cleanReply || '',
+      attachment: attachmentUrl || '',
       date: new Date(),
       likes: [],
     });
@@ -771,6 +875,11 @@ const replyToComment = async (req, res) => {
       } catch (notifErr) {
         console.error('Error creating reply notification:', notifErr);
       }
+    }
+
+    // Trigger @mention notifications
+    if (cleanReply) {
+      dispatchMentionNotifications(cleanReply, req.user, blog.title, blog._id, req);
     }
 
     res.json(populatedBlog.comments);
@@ -873,6 +982,542 @@ const getUserBlogs = async (req, res) => {
   }
 };
 
+const recordBlogRevision = async (blogDoc, authorId, summary = 'Story updated') => {
+  try {
+    if (!blogDoc || !blogDoc._id) return null;
+    const count = await BlogRevision.countDocuments({ blog: blogDoc._id });
+    const cleanBody = (blogDoc.content || '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const wordCount = cleanBody ? cleanBody.split(/\s+/).filter(Boolean).length : 0;
+
+    const revision = await BlogRevision.create({
+      blog: blogDoc._id,
+      author: authorId || blogDoc.author,
+      title: blogDoc.title || 'Untitled',
+      subtitle: blogDoc.subtitle || '',
+      content: blogDoc.content || '',
+      category: blogDoc.category || 'Technology',
+      tags: blogDoc.tags || [],
+      wordCount,
+      summary,
+      versionNumber: count + 1,
+    });
+    return revision;
+  } catch (err) {
+    console.error('Error recording blog revision snapshot:', err);
+    return null;
+  }
+};
+
+const autoSaveDraft = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const {
+      blogId,
+      title,
+      subtitle,
+      content,
+      category,
+      tags,
+      readTime,
+      imageCredit,
+    } = req.body;
+
+    const cleanTitle = sanitizePlainText(title || 'Untitled Draft');
+    const cleanSubtitle = sanitizePlainText(subtitle || '');
+    const cleanCategory = sanitizePlainText(category || 'Technology');
+    const rawContent = sanitizeStoryContent(content || '');
+    const cleanContent = rawContent && rawContent.trim() ? rawContent : '<p><br></p>';
+    const cleanImageCredit = sanitizePlainText(imageCredit || '');
+    const parsedTags = Array.isArray(tags)
+      ? tags.map((t) => sanitizePlainText(t)).filter(Boolean).slice(0, 10)
+      : [];
+
+    let blog;
+    if (blogId) {
+      blog = await Blog.findById(blogId);
+      if (blog) {
+        if (String(blog.author) !== String(userId) && !isAdminUser(req.user)) {
+          return res.status(403).json({ message: 'Not authorized to edit this draft' });
+        }
+        blog.title = cleanTitle;
+        blog.subtitle = cleanSubtitle;
+        blog.category = cleanCategory;
+        blog.content = cleanContent;
+        blog.imageCredit = cleanImageCredit;
+        blog.tags = parsedTags;
+        if (readTime) blog.readTime = Number(readTime) || blog.readTime;
+        await blog.save();
+      }
+    }
+
+    if (!blog) {
+      blog = new Blog({
+        title: cleanTitle,
+        subtitle: cleanSubtitle,
+        category: cleanCategory,
+        content: cleanContent,
+        imageCredit: cleanImageCredit,
+        tags: parsedTags,
+        readTime: Number(readTime) || 3,
+        author: userId,
+        status: 'draft',
+      });
+      await blog.save();
+    }
+
+    res.json({
+      success: true,
+      draftId: blog._id,
+      savedAt: new Date().toISOString(),
+      message: 'Draft auto-saved successfully',
+    });
+  } catch (err) {
+    console.error('Error in autoSaveDraft:', err);
+    res.status(500).json({ message: 'Failed to auto-save draft' });
+  }
+};
+
+const getBlogRevisions = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const blog = await Blog.findById(id);
+    if (!blog) {
+      return res.status(404).json({ message: 'Blog not found' });
+    }
+    if (String(blog.author) !== String(req.user._id) && !isAdminUser(req.user)) {
+      return res.status(403).json({ message: 'Not authorized to view revisions' });
+    }
+
+    const revisions = await BlogRevision.find({ blog: id })
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean();
+
+    res.json(revisions);
+  } catch (err) {
+    console.error('Error fetching blog revisions:', err);
+    res.status(500).json({ message: 'Server error fetching revisions' });
+  }
+};
+
+const restoreBlogRevision = async (req, res) => {
+  try {
+    const { id, revisionId } = req.params;
+    const blog = await Blog.findById(id);
+    if (!blog) {
+      return res.status(404).json({ message: 'Blog not found' });
+    }
+    if (String(blog.author) !== String(req.user._id) && !isAdminUser(req.user)) {
+      return res.status(403).json({ message: 'Not authorized to restore revisions' });
+    }
+
+    const revision = await BlogRevision.findById(revisionId);
+    if (!revision || String(revision.blog) !== String(id)) {
+      return res.status(404).json({ message: 'Revision snapshot not found' });
+    }
+
+    // Save current state as a revision before restoring
+    await recordBlogRevision(blog, req.user._id, `Auto-saved before restoring v${revision.versionNumber}`);
+
+    // Restore fields
+    blog.title = revision.title;
+    blog.subtitle = revision.subtitle || '';
+    blog.content = revision.content;
+    if (revision.category) blog.category = revision.category;
+    if (Array.isArray(revision.tags)) blog.tags = revision.tags;
+
+    await blog.save();
+
+    const populatedBlog = await populateBlogQuery(Blog.findById(blog._id)).lean();
+    updateBlogInCache(populatedBlog);
+    invalidateBlogsCache();
+
+    res.json({
+      success: true,
+      message: `Restored to version ${revision.versionNumber}`,
+      blog: populatedBlog,
+    });
+  } catch (err) {
+    console.error('Error restoring blog revision:', err);
+    res.status(500).json({ message: 'Failed to restore revision' });
+  }
+};
+
+const aiCopilotHandler = async (req, res) => {
+  try {
+    const { action, title, subtitle, content, category, tags } = req.body;
+    if (!action) {
+      return res.status(400).json({
+        message: 'Action is required (generate-headlines, generate-tldr, analyze-readability)',
+      });
+    }
+
+    const results = await generateAiCopilotInsights({
+      action,
+      title: title || '',
+      subtitle: subtitle || '',
+      content: content || '',
+      category: category || 'Technology',
+      tags: tags || [],
+    });
+
+    res.json(results);
+  } catch (err) {
+    console.error('AI Copilot error:', err);
+    res.status(500).json({ message: err.message || 'AI Copilot assistance error' });
+  }
+};
+
+const getForYouFeed = async (req, res) => {
+  try {
+    const allBlogs = await getAllBlogsFromCacheOrDb();
+    const visibleBlogs = allBlogs.filter(isBlogPubliclyVisible);
+
+    const followedAuthorIds = new Set();
+    const preferredCategories = new Set();
+
+    if (req.user) {
+      if (Array.isArray(req.user.following)) {
+        req.user.following.forEach((id) => followedAuthorIds.add(String(id)));
+      }
+      if (Array.isArray(req.user.bookmarkedBlogs)) {
+        visibleBlogs
+          .filter((b) => req.user.bookmarkedBlogs.some((bmId) => String(bmId) === String(b._id)))
+          .forEach((b) => {
+            if (b.category) preferredCategories.add(b.category);
+          });
+      }
+    }
+
+    const now = Date.now();
+    const scoredBlogs = visibleBlogs.map((blog) => {
+      const pubDate = new Date(blog.publishDate || blog.date || blog.createdAt).getTime();
+      const hoursSincePublish = Math.max(0.1, (now - pubDate) / (1000 * 60 * 60));
+
+      const likes = blog.likesCount || blog.likes?.length || 0;
+      const comments = blog.comments?.length || 0;
+      const shares = blog.sharesCount || blog.shares || 0;
+
+      let affinityBonus = 0;
+      if (blog.author?._id && followedAuthorIds.has(String(blog.author._id))) {
+        affinityBonus += 25;
+      }
+      if (blog.category && preferredCategories.has(blog.category)) {
+        affinityBonus += 15;
+      }
+      if (blog.isFeatured) {
+        affinityBonus += 20;
+      }
+
+      const score =
+        (likes * 2 + comments * 3 + shares * 4 + affinityBonus + 5) /
+        Math.pow(hoursSincePublish + 2, 1.4);
+
+      return {
+        ...blog,
+        algorithmicScore: score,
+      };
+    });
+
+    scoredBlogs.sort((a, b) => b.algorithmicScore - a.algorithmicScore);
+
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 12;
+    const startIndex = (page - 1) * limit;
+    const paginated = scoredBlogs.slice(startIndex, startIndex + limit);
+
+    res.json({
+      blogs: paginated,
+      page,
+      totalPages: Math.ceil(scoredBlogs.length / limit),
+      totalStories: scoredBlogs.length,
+    });
+  } catch (error) {
+    console.error('Error computing for-you feed:', error);
+    res.status(500).json({ message: 'Error generating personalized feed' });
+  }
+};
+
+const getRssFeed = async (req, res) => {
+  try {
+    const allBlogs = await getAllBlogsFromCacheOrDb();
+    const visibleBlogs = allBlogs.filter(isBlogPubliclyVisible).slice(0, 30);
+    const baseUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+
+    const itemsXml = visibleBlogs
+      .map((blog) => {
+        const pubDate = new Date(blog.publishDate || blog.date || blog.createdAt).toUTCString();
+        const cleanTitle = (blog.title || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const cleanDesc = (blog.subtitle || blog.summary || (blog.content || '').replace(/<[^>]*>/g, '').slice(0, 240))
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        const authorName = blog.author?.username || 'BlogSum Author';
+
+        return `
+    <item>
+      <title>${cleanTitle}</title>
+      <link>${baseUrl}/blog/${blog._id}</link>
+      <guid>${baseUrl}/blog/${blog._id}</guid>
+      <pubDate>${pubDate}</pubDate>
+      <dc:creator>${authorName}</dc:creator>
+      <description>${cleanDesc}</description>
+      ${blog.category ? `<category>${blog.category}</category>` : ''}
+    </item>`;
+      })
+      .join('\n');
+
+    const rssXml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>BlogSum - Independent Editorial &amp; Technology Stories</title>
+    <link>${baseUrl}</link>
+    <description>The latest in-depth stories, analysis, and essays from independent authors on BlogSum.</description>
+    <language>en</language>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+${itemsXml}
+  </channel>
+</rss>`;
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.send(rssXml);
+  } catch (error) {
+    console.error('Error generating RSS feed:', error);
+    res.status(500).send('Error generating RSS feed');
+  }
+};
+
+const { generateStoryAudio, cleanTextForNarration } = require('../Utils/audioSynthesizer');
+
+const generateBlogAudio = async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id);
+    if (!blog) {
+      return res.status(404).json({ message: 'Story not found' });
+    }
+
+    // If story already has a persistent Cloudinary audio narration, return immediately
+    if (blog.audioUrl && blog.audioUrl.startsWith('https://res.cloudinary.com')) {
+      return res.json({
+        success: true,
+        audioUrl: blog.audioUrl,
+        audioDuration: blog.audioDuration || 0,
+        fallbackText: cleanTextForNarration(blog.title, blog.subtitle, blog.content),
+      });
+    }
+
+    const { audioUrl, audioDuration, fallbackText } = await generateStoryAudio(
+      blog._id,
+      blog.title,
+      blog.subtitle,
+      blog.content
+    );
+
+    if (audioUrl) {
+      blog.audioUrl = audioUrl;
+      blog.audioDuration = audioDuration;
+      await blog.save();
+      updateBlogInCache(blog);
+    }
+
+    res.json({
+      success: true,
+      audioUrl: blog.audioUrl || audioUrl,
+      audioDuration: blog.audioDuration || audioDuration,
+      fallbackText: fallbackText || '',
+    });
+  } catch (error) {
+    console.error('Error generating story audio:', error);
+    res.status(500).json({ message: 'Failed to generate audio narration' });
+  }
+};
+
+const generateOgImage = async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id).populate('author', 'username');
+    if (!blog) return res.status(404).send('Blog not found');
+
+    const escapeXml = (unsafe = '') =>
+      String(unsafe)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+
+    const title = escapeXml(blog.title || 'BlogSum Story');
+    const author = escapeXml(blog.author?.username || 'BlogSum Author');
+    const category = escapeXml(blog.category || 'Stories');
+    const readTime = `${blog.readTime || 3} min read`;
+    const initial = (blog.author?.username?.[0] || 'B').toUpperCase();
+
+    const words = title.split(' ');
+    const lines = [];
+    let curLine = '';
+    for (const w of words) {
+      if ((curLine + ' ' + w).trim().length > 38) {
+        lines.push(curLine.trim());
+        curLine = w;
+      } else {
+        curLine += ' ' + w;
+      }
+    }
+    if (curLine) lines.push(curLine.trim());
+    const displayLines = lines.slice(0, 3);
+
+    const titleSvg = displayLines
+      .map(
+        (line, idx) =>
+          `<tspan x="80" dy="${idx === 0 ? 0 : 54}">${line}</tspan>`
+      )
+      .join('');
+
+    const svg = `<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#090d16"/>
+          <stop offset="60%" stop-color="#0f172a"/>
+          <stop offset="100%" stop-color="#1e1b4b"/>
+        </linearGradient>
+        <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#4f46e5"/>
+          <stop offset="50%" stop-color="#7c3aed"/>
+          <stop offset="100%" stop-color="#ec4899"/>
+        </linearGradient>
+        <radialGradient id="glow" cx="80%" cy="20%" r="60%">
+          <stop offset="0%" stop-color="#6366f1" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#0f172a" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+
+      <rect width="1200" height="630" fill="url(#bg)"/>
+      <rect width="1200" height="630" fill="url(#glow)"/>
+
+      <rect x="0" y="0" width="1200" height="8" fill="url(#accent)"/>
+
+      <g transform="translate(80, 80)">
+        <rect width="36" height="36" rx="8" fill="url(#accent)"/>
+        <text x="18" y="25" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="900" font-size="20" fill="#ffffff" text-anchor="middle">B</text>
+        <text x="48" y="26" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="22" fill="#ffffff" letter-spacing="-0.5">BlogSum</text>
+        <rect x="160" y="5" width="110" height="26" rx="13" fill="rgba(99, 102, 241, 0.2)" stroke="rgba(99, 102, 241, 0.4)" stroke-width="1"/>
+        <text x="215" y="22" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="700" font-size="11" fill="#818cf8" text-anchor="middle" letter-spacing="1">EDITORIAL</text>
+      </g>
+
+      <g transform="translate(80, 160)">
+        <rect width="140" height="34" rx="17" fill="rgba(255, 255, 255, 0.08)" stroke="rgba(255, 255, 255, 0.15)" stroke-width="1"/>
+        <text x="70" y="22" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="700" font-size="13" fill="#38bdf8" text-anchor="middle">${category.toUpperCase()}</text>
+      </g>
+
+      <text x="80" y="270" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="44" fill="#f8fafc" letter-spacing="-0.5">
+        ${titleSvg}
+      </text>
+
+      <g transform="translate(80, 500)">
+        <circle cx="28" cy="28" r="28" fill="#4f46e5"/>
+        <text x="28" y="37" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="700" font-size="22" fill="#ffffff" text-anchor="middle">${initial}</text>
+        <text x="72" y="26" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="700" font-size="20" fill="#ffffff">${author}</text>
+        <text x="72" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="500" font-size="14" fill="#94a3b8">Author · ${readTime}</text>
+      </g>
+
+      <g transform="translate(940, 524)">
+        <text x="180" y="0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="600" font-size="15" fill="#64748b" text-anchor="end">blogsum.vercel.app</text>
+      </g>
+    </svg>`;
+
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400');
+    res.send(svg);
+  } catch (err) {
+    console.error('Error generating OG image:', err);
+    res.status(500).send('Failed to generate preview image');
+  }
+};
+
+const generateAuthorRssFeed = async (req, res) => {
+  try {
+    const { username } = req.params;
+    const authorUser = await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
+    if (!authorUser) return res.status(404).send('Author not found');
+
+    const blogs = await Blog.find({ author: authorUser._id, status: 'published' })
+      .sort({ publishDate: -1, date: -1 })
+      .limit(30)
+      .lean();
+
+    const baseUrl = process.env.CLIENT_URL || 'https://blog-sum.vercel.app';
+    const itemsXml = blogs.map((b) => `
+    <item>
+      <title><![CDATA[${b.title}]]></title>
+      <link>${baseUrl}/blog/${b._id}</link>
+      <guid>${baseUrl}/blog/${b._id}</guid>
+      <pubDate>${new Date(b.publishDate || b.date).toUTCString()}</pubDate>
+      <dc:creator><![CDATA[${authorUser.username}]]></dc:creator>
+      <description><![CDATA[${b.subtitle || (b.content || '').replace(/<[^>]+>/g, '').slice(0, 200)}]]></description>
+      ${b.category ? `<category>${b.category}</category>` : ''}
+    </item>`).join('\n');
+
+    const rssXml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>${authorUser.username}'s Stories on BlogSum</title>
+    <link>${baseUrl}/profile/${authorUser._id}</link>
+    <description>Recent articles and essays written by ${authorUser.username} on BlogSum.</description>
+    <language>en</language>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+${itemsXml}
+  </channel>
+</rss>`;
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.send(rssXml);
+  } catch (err) {
+    res.status(500).send('Error generating author RSS feed');
+  }
+};
+
+const generateCategoryRssFeed = async (req, res) => {
+  try {
+    const { category } = req.params;
+    const blogs = await Blog.find({ category: new RegExp(`^${category}$`, 'i'), status: 'published' })
+      .populate('author', 'username')
+      .sort({ publishDate: -1, date: -1 })
+      .limit(30)
+      .lean();
+
+    const baseUrl = process.env.CLIENT_URL || 'https://blog-sum.vercel.app';
+    const itemsXml = blogs.map((b) => `
+    <item>
+      <title><![CDATA[${b.title}]]></title>
+      <link>${baseUrl}/blog/${b._id}</link>
+      <guid>${baseUrl}/blog/${b._id}</guid>
+      <pubDate>${new Date(b.publishDate || b.date).toUTCString()}</pubDate>
+      <dc:creator><![CDATA[${b.author?.username || 'Author'}]]></dc:creator>
+      <description><![CDATA[${b.subtitle || (b.content || '').replace(/<[^>]+>/g, '').slice(0, 200)}]]></description>
+      <category>${b.category || category}</category>
+    </item>`).join('\n');
+
+    const rssXml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>BlogSum - ${category} Stories</title>
+    <link>${baseUrl}/?category=${encodeURIComponent(category)}</link>
+    <description>The latest stories and insights in ${category} on BlogSum.</description>
+    <language>en</language>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+${itemsXml}
+  </channel>
+</rss>`;
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.send(rssXml);
+  } catch (err) {
+    res.status(500).send('Error generating category RSS feed');
+  }
+};
+
 module.exports = {
   getUserBlogs,
   getBlogs,
@@ -894,5 +1539,16 @@ module.exports = {
   populateBlogQuery,
   publishDueScheduledBlogs,
   startScheduledBlogsCron,
+  recordBlogRevision,
+  autoSaveDraft,
+  getBlogRevisions,
+  restoreBlogRevision,
+  aiCopilotHandler,
+  getForYouFeed,
+  getRssFeed,
+  generateAuthorRssFeed,
+  generateCategoryRssFeed,
+  generateOgImage,
+  generateBlogAudio,
   upload,
 };

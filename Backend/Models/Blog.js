@@ -13,8 +13,12 @@ const blogSchema = new mongoose.Schema({
   },
   readTime: String,
   imageUrl: String,
+  imageCredit: { type: String, default: '' },
+  audioUrl: { type: String, default: '' },
+  audioDuration: { type: Number, default: 0 },
   images: [{ type: String }],
   tags: [{ type: String }],
+  aiKeyTakeaways: [{ type: String }],
   category: {
     type: String,
     enum: [
@@ -36,7 +40,19 @@ const blogSchema = new mongoose.Schema({
     ],
     required: true,
   },
-  content: { type: String, required: true }, 
+  content: {
+    type: String,
+    default: '<p><br></p>',
+    validate: {
+      validator: function (v) {
+        if (this.status === 'published') {
+          return typeof v === 'string' && v.trim().length > 0;
+        }
+        return true;
+      },
+      message: 'Story content is required when publishing.',
+    },
+  }, 
   likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   reactions: [
     {
@@ -55,17 +71,33 @@ const blogSchema = new mongoose.Schema({
   allowComments: { type: Boolean, default: true },
   isFeatured: { type: Boolean, default: false },
   isPinned: { type: Boolean, default: false },
+  publication: { type: mongoose.Schema.Types.ObjectId, ref: 'Publication' },
+  accessLevel: {
+    type: String,
+    enum: ['public', 'members', 'metered'],
+    default: 'public',
+  },
+  isMembersOnly: { type: Boolean, default: false },
+  isSponsored: { type: Boolean, default: false },
+  sponsorName: { type: String, default: '' },
+  digitalProduct: {
+    enabled: { type: Boolean, default: false },
+    name: { type: String, default: '' },
+    downloadUrl: { type: String, default: '' },
+    price: { type: Number, default: 0 },
+  },
   comments: [
     {
       user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      comment: String,
-      attachment: String,
+      comment: { type: String, default: '' },
+      attachment: { type: String, default: '' },
       date: { type: Date, default: Date.now },
       likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
       replies: [
         {
           user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-          comment: String,
+          comment: { type: String, default: '' },
+          attachment: { type: String, default: '' },
           date: { type: Date, default: Date.now },
           likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
         },

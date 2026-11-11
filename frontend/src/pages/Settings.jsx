@@ -26,12 +26,26 @@ import {
   KeyOutlined,
   CheckCircleFilled,
   DeleteOutlined,
+  LaptopOutlined,
+  MobileOutlined,
+  GlobalOutlined,
+  DollarOutlined,
+  ApiOutlined,
+  HistoryOutlined,
+  PlusOutlined,
+  SendOutlined,
+  ThunderboltOutlined,
+  LinkOutlined,
+  StarFilled,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import moment from 'moment';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Navbar from '../components/NavBar';
 import axiosInstance from '../axiosConfig';
 import useAuth from '../hooks/useAuth';
+import { useTheme } from '../contexts/ThemeContext';
+import { subscribeToPushNotifications } from '../utils/pushManager';
 import { BLOG_CATEGORIES } from '../components/BlogForm';
 
 const SETTINGS_STORAGE_KEY = 'blogsum_user_settings_v1';
@@ -60,6 +74,7 @@ const loadStoredPrefs = () => {
 
 function Settings() {
   const { user, logout } = useAuth();
+  const { themeMode, changeThemeMode } = useTheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [profileForm] = Form.useForm();
@@ -102,6 +117,223 @@ function Settings() {
     queryFn: async () => (await axiosInstance.get('/api/auth/2fa/status')).data,
     enabled: Boolean(user),
   });
+
+  const {
+    data: sessionsData,
+    refetch: refetchSessions,
+    isLoading: loadingSessions,
+  } = useQuery({
+    queryKey: ['userSessions'],
+    queryFn: async () => (await axiosInstance.get('/api/auth/sessions')).data,
+    enabled: Boolean(user),
+  });
+
+  const { data: securityLogs = [], refetch: refetchSecurityLogs } = useQuery({
+    queryKey: ['securityLogs'],
+    queryFn: async () => (await axiosInstance.get('/api/auth/security-logs')).data,
+    enabled: Boolean(user),
+  });
+
+  const { data: monetizationData, refetch: refetchMonetization } = useQuery({
+    queryKey: ['monetizationSettings'],
+    queryFn: async () => (await axiosInstance.get('/api/users/payout-and-membership')).data,
+    enabled: Boolean(user),
+  });
+
+  const { data: patsData = [], refetch: refetchPATs } = useQuery({
+    queryKey: ['developerPATs'],
+    queryFn: async () => (await axiosInstance.get('/api/developer/tokens')).data,
+    enabled: Boolean(user),
+  });
+
+  const { data: webhooksData = [], refetch: refetchWebhooks } = useQuery({
+    queryKey: ['developerWebhooks'],
+    queryFn: async () => (await axiosInstance.get('/api/developer/webhooks')).data,
+    enabled: Boolean(user),
+  });
+
+  // Monetization State
+  const [payoutMethod, setPayoutMethod] = useState('paypal');
+  const [paypalEmail, setPaypalEmail] = useState('');
+  const [savingPayout, setSavingPayout] = useState(false);
+  const [togglingStripe, setTogglingStripe] = useState(false);
+  const [updatingMembership, setUpdatingMembership] = useState(false);
+
+  useEffect(() => {
+    if (monetizationData?.payoutSettings) {
+      setPayoutMethod(monetizationData.payoutSettings.payoutMethod || 'paypal');
+      setPaypalEmail(monetizationData.payoutSettings.paypalEmail || '');
+    }
+  }, [monetizationData]);
+
+  const handleSavePayoutSettings = async () => {
+    setSavingPayout(true);
+    try {
+      await axiosInstance.put('/api/users/payout-settings', {
+        payoutMethod,
+        paypalEmail,
+      });
+      message.success('Payout preferences saved');
+      refetchMonetization();
+    } catch {
+      message.error('Failed to update payout settings');
+    } finally {
+      setSavingPayout(false);
+    }
+  };
+
+  const handleToggleStripe = async () => {
+    setTogglingStripe(true);
+    try {
+      const res = await axiosInstance.post('/api/users/stripe-connect');
+      message.success(res.data.message || 'Stripe Connect updated');
+      refetchMonetization();
+    } catch {
+      message.error('Failed to update Stripe Connect');
+    } finally {
+      setTogglingStripe(false);
+    }
+  };
+
+  const handleToggleMembership = async (targetTier) => {
+    setUpdatingMembership(true);
+    try {
+      const res = await axiosInstance.post('/api/users/membership-tier', { tier: targetTier });
+      message.success(res.data.message || 'Membership updated');
+      refetchMonetization();
+    } catch {
+      message.error('Failed to change membership');
+    } finally {
+      setUpdatingMembership(false);
+    }
+  };
+
+  // Developer Platform (PAT & Webhooks) State
+  const [isPatModalVisible, setIsPatModalVisible] = useState(false);
+  const [patName, setPatName] = useState('');
+  const [patScopes, setPatScopes] = useState(['stories:read', 'stories:write']);
+  const [creatingPat, setCreatingPat] = useState(false);
+  const [createdRawToken, setCreatedRawToken] = useState('');
+  const [isTokenRevealModalVisible, setIsTokenRevealModalVisible] = useState(false);
+  const [revokingTokenId, setRevokingTokenId] = useState(null);
+
+  const [newWebhookUrl, setNewWebhookUrl] = useState('');
+  const [newWebhookEvents, setNewWebhookEvents] = useState(['story.published', 'story.updated']);
+  const [creatingWebhook, setCreatingWebhook] = useState(false);
+  const [deletingWebhookId, setDeletingWebhookId] = useState(null);
+  const [testingWebhookId, setTestingWebhookId] = useState(null);
+
+  const handleCreatePAT = async () => {
+    if (!patName.trim()) {
+      message.warning('Please provide a name for this access token');
+      return;
+    }
+    setCreatingPat(true);
+    try {
+      const res = await axiosInstance.post('/api/developer/tokens', {
+        name: patName.trim(),
+        scopes: patScopes,
+      });
+      setIsPatModalVisible(false);
+      setPatName('');
+      setCreatedRawToken(res.data.rawToken);
+      setIsTokenRevealModalVisible(true);
+      refetchPATs();
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to create access token');
+    } finally {
+      setCreatingPat(false);
+    }
+  };
+
+  const handleRevokePAT = async (tokenId) => {
+    setRevokingTokenId(tokenId);
+    try {
+      await axiosInstance.delete(`/api/developer/tokens/${tokenId}`);
+      message.success('Personal access token revoked');
+      refetchPATs();
+    } catch {
+      message.error('Failed to revoke access token');
+    } finally {
+      setRevokingTokenId(null);
+    }
+  };
+
+  const handleCreateWebhook = async () => {
+    if (!newWebhookUrl.trim() || !newWebhookUrl.startsWith('http')) {
+      message.warning('Please enter a valid HTTP or HTTPS endpoint URL');
+      return;
+    }
+    setCreatingWebhook(true);
+    try {
+      await axiosInstance.post('/api/developer/webhooks', {
+        url: newWebhookUrl.trim(),
+        events: newWebhookEvents,
+      });
+      message.success('Webhook registered successfully');
+      setNewWebhookUrl('');
+      refetchWebhooks();
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to register webhook');
+    } finally {
+      setCreatingWebhook(false);
+    }
+  };
+
+  const handleDeleteWebhook = async (webhookId) => {
+    setDeletingWebhookId(webhookId);
+    try {
+      await axiosInstance.delete(`/api/developer/webhooks/${webhookId}`);
+      message.success('Webhook endpoint deleted');
+      refetchWebhooks();
+    } catch {
+      message.error('Failed to remove webhook');
+    } finally {
+      setDeletingWebhookId(null);
+    }
+  };
+
+  const handleTestWebhook = async (webhookId) => {
+    setTestingWebhookId(webhookId);
+    try {
+      const res = await axiosInstance.post(`/api/developer/webhooks/${webhookId}/test`);
+      message.success(res.data.message || 'Test event dispatched successfully');
+      refetchWebhooks();
+    } catch {
+      message.error('Failed to dispatch test webhook');
+    } finally {
+      setTestingWebhookId(null);
+    }
+  };
+
+  const [terminatingSessionId, setTerminatingSessionId] = useState(null);
+  const [loggingOutOthers, setLoggingOutOthers] = useState(false);
+
+  const handleTerminateSession = async (sessionId) => {
+    setTerminatingSessionId(sessionId);
+    try {
+      await axiosInstance.delete(`/api/auth/sessions/${sessionId}`);
+      message.success('Device session terminated');
+      refetchSessions();
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to terminate session');
+    } finally {
+      setTerminatingSessionId(null);
+    }
+  };
+
+  const handleLogoutOtherSessions = async () => {
+    setLoggingOutOthers(true);
+    try {
+      await axiosInstance.post('/api/auth/sessions/logout-others');
+      message.success('All other remote devices logged out');
+      refetchSessions();
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to log out other devices');
+    } finally {
+      setLoggingOutOthers(false);
+    }
+  };
 
   const [is2FASetupModalVisible, setIs2FASetupModalVisible] = useState(false);
   const [is2FADisableModalVisible, setIs2FADisableModalVisible] = useState(false);
@@ -318,6 +550,8 @@ function Settings() {
     { key: 'appearance', label: 'Appearance & Reading', icon: <EyeOutlined /> },
     { key: 'notifications', label: 'Notifications', icon: <BellOutlined /> },
     { key: 'privacy', label: 'Privacy & Security', icon: <SafetyCertificateOutlined /> },
+    { key: 'monetization', label: 'Monetization & Payouts', icon: <DollarOutlined /> },
+    { key: 'developer', label: 'Developer & Webhooks', icon: <ApiOutlined /> },
   ];
 
   return (
@@ -465,15 +699,33 @@ function Settings() {
               <div className="ed-settings-rows">
                 <div className="ed-settings-row">
                   <div className="ed-settings-row__info">
-                    <span className="ed-settings-row__label">Low-Light / Dark Theme</span>
+                    <span className="ed-settings-row__label">Interface Theme</span>
                     <span className="ed-settings-row__sub">
-                      Reduce screen glare for comfortable evening reading.
+                      Choose between light mode, dark mode, or automatically match your operating system theme.
                     </span>
                   </div>
-                  <Switch
-                    checked={prefs.darkMode}
-                    onChange={(v) => updatePref('darkMode', v)}
-                  />
+                  <div className="ed-settings-segmented">
+                    {[
+                      { key: 'light', label: '☀️ Light' },
+                      { key: 'dark', label: '🌙 Dark' },
+                      { key: 'system', label: '💻 System' },
+                    ].map((mode) => (
+                      <button
+                        key={mode.key}
+                        type="button"
+                        onClick={() => {
+                          changeThemeMode(mode.key);
+                          updatePref('themeMode', mode.key);
+                          updatePref('darkMode', mode.key === 'dark');
+                        }}
+                        className={`ed-settings-seg-btn ${
+                          themeMode === mode.key ? 'is-active' : ''
+                        }`}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="ed-settings-row">
@@ -567,7 +819,21 @@ function Settings() {
                   </div>
                   <Switch
                     checked={prefs.pushNotifications}
-                    onChange={(v) => updatePref('pushNotifications', v)}
+                    onChange={async (v) => {
+                      updatePref('pushNotifications', v);
+                      if (v && user?.token) {
+                        message.loading({ content: 'Requesting browser push permission...', key: 'pushPerm' });
+                        const res = await subscribeToPushNotifications(user.token);
+                        if (res.success) {
+                          message.success({ content: 'Browser Push Notifications enabled!', key: 'pushPerm' });
+                        } else if (res.reason === 'denied') {
+                          message.warning({ content: 'Notification permission was denied in your browser settings.', key: 'pushPerm' });
+                          updatePref('pushNotifications', false);
+                        } else {
+                          message.info({ content: 'Push subscription updated.', key: 'pushPerm' });
+                        }
+                      }
+                    }}
                   />
                 </div>
 
@@ -686,6 +952,112 @@ function Settings() {
                   )}
                 </div>
 
+                {/* Active Sessions & Logged-In Devices */}
+                <div className="ed-settings-row" style={{ alignItems: 'flex-start' }}>
+                  <div className="ed-settings-row__info" style={{ width: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 8 }}>
+                      <span className="ed-settings-row__label">
+                        Active Devices & Sessions ({sessionsData?.sessions?.length || 1})
+                      </span>
+                      {sessionsData?.sessions && sessionsData.sessions.length > 1 && (
+                        <Button
+                          size="small"
+                          danger
+                          loading={loggingOutOthers}
+                          onClick={handleLogoutOtherSessions}
+                          style={{ borderRadius: 8, fontSize: '12px' }}
+                        >
+                          Log Out All Other Devices
+                        </Button>
+                      )}
+                    </div>
+                    <span className="ed-settings-row__sub" style={{ marginBottom: 14 }}>
+                      Devices currently authenticated to your account. You can revoke access from any remote device at any time.
+                    </span>
+
+                    {loadingSessions ? (
+                      <div style={{ textAlign: 'center', padding: '16px 0' }}><Spin size="small" /></div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {(sessionsData?.sessions || []).map((sess) => {
+                          const isMobile = sess.device === 'Mobile';
+                          return (
+                            <div
+                              key={sess.sessionId}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '10px 14px',
+                                borderRadius: 10,
+                                background: sess.isCurrent ? '#f0fdf4' : '#f8fafc',
+                                border: sess.isCurrent ? '1px solid #bbf7d0' : '1px solid #e2e8f0',
+                                gap: 12,
+                                flexWrap: 'wrap',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div
+                                  style={{
+                                    width: 36,
+                                    height: 36,
+                                    borderRadius: '50%',
+                                    background: sess.isCurrent ? '#dcfce7' : '#e2e8f0',
+                                    color: sess.isCurrent ? '#16a34a' : '#475569',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: 16,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {isMobile ? <MobileOutlined /> : <LaptopOutlined />}
+                                </div>
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ fontWeight: 700, fontSize: '13.5px', color: '#0f172a' }}>
+                                      {sess.browser} on {sess.os}
+                                    </span>
+                                    {sess.isCurrent && (
+                                      <span
+                                        style={{
+                                          fontSize: '11px',
+                                          fontWeight: 700,
+                                          color: '#15803d',
+                                          background: '#dcfce7',
+                                          padding: '1px 8px',
+                                          borderRadius: 999,
+                                        }}
+                                      >
+                                        This Device
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: 2 }}>
+                                    {sess.ip ? `IP: ${sess.ip} • ` : ''}
+                                    Last active: {moment(sess.lastActive).fromNow()}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {!sess.isCurrent && (
+                                <Button
+                                  size="small"
+                                  onClick={() => handleTerminateSession(sess.sessionId)}
+                                  loading={terminatingSessionId === sess.sessionId}
+                                  style={{ borderRadius: 6, fontSize: '12px' }}
+                                >
+                                  Log Out
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div className="ed-settings-row">
                   <div className="ed-settings-row__info">
                     <span className="ed-settings-row__label">Export My Data Archive (GDPR)</span>
@@ -756,6 +1128,301 @@ function Settings() {
                   >
                     Delete Account...
                   </Button>
+                </div>
+
+                {/* 4.5 Personal Security Audit Logs */}
+                <div className="ed-settings-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, marginTop: 12 }}>
+                  <div className="ed-settings-row__info">
+                    <span className="ed-settings-row__label">Security Audit Logs</span>
+                    <span className="ed-settings-row__sub">
+                      Timeline of authentication events, password updates, 2FA status changes, and remote device revocations.
+                    </span>
+                  </div>
+
+                  {securityLogs.length === 0 ? (
+                    <div style={{ padding: '14px 16px', background: '#f8fafc', borderRadius: 10, fontSize: 13, color: '#64748b' }}>
+                      No recent security audit logs recorded.
+                    </div>
+                  ) : (
+                    <div className="ed-security-logs-timeline" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {securityLogs.slice(0, 8).map((log, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '10px 14px',
+                            background: '#f8fafc',
+                            borderRadius: 10,
+                            border: '1px solid #f1f5f9',
+                            fontSize: 13,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div
+                              style={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: '50%',
+                                background:
+                                  log.status === 'failed'
+                                    ? '#ef4444'
+                                    : log.status === 'warning'
+                                    ? '#f59e0b'
+                                    : '#10b981',
+                              }}
+                            />
+                            <span style={{ fontWeight: 600, color: '#1e293b' }}>{log.action}</span>
+                          </div>
+                          <span style={{ color: '#64748b', fontSize: 12 }}>
+                            {moment(log.timestamp).format('MMM D, YYYY · h:mm A')} {log.ip ? `(${log.ip})` : ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {/* 5. Creator Economy & Monetization */}
+            <section id="settings-monetization" className="ed-settings-card">
+              <div className="ed-settings-card__head">
+                <div>
+                  <h2 className="ed-settings-card__title">Creator Economy & Monetization</h2>
+                  <p className="ed-settings-card__desc">
+                    Manage your reader membership, author payout channels, and tipping preferences.
+                  </p>
+                </div>
+              </div>
+
+              <div className="ed-settings-card__body">
+                {/* Reader Membership Tier */}
+                <div className="ed-settings-row">
+                  <div className="ed-settings-row__info">
+                    <span className="ed-settings-row__label">Reader Membership Tier</span>
+                    <span className="ed-settings-row__sub">
+                      Current status:{' '}
+                      <strong style={{ color: monetizationData?.membership?.isActive ? '#4f46e5' : '#64748b' }}>
+                        {monetizationData?.membership?.isActive ? 'BlogSum Premium Member' : 'Free Reader Tier'}
+                      </strong>
+                      . Members receive unlimited access to paywalled stories, audiobooks, and author publications.
+                    </span>
+                  </div>
+                  <Button
+                    type={monetizationData?.membership?.isActive ? 'default' : 'primary'}
+                    loading={updatingMembership}
+                    onClick={() => handleToggleMembership(monetizationData?.membership?.isActive ? 'free' : 'premium')}
+                    style={{
+                      borderRadius: 10,
+                      fontWeight: 700,
+                      height: 38,
+                      background: monetizationData?.membership?.isActive ? undefined : 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                    }}
+                  >
+                    {monetizationData?.membership?.isActive ? 'Downgrade to Free' : 'Upgrade to Member ($5/mo)'}
+                  </Button>
+                </div>
+
+                {/* Stripe Connect Express Author Payouts */}
+                <div className="ed-settings-row">
+                  <div className="ed-settings-row__info">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="ed-settings-row__label">Stripe Connect Global Payouts</span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          background: monetizationData?.payoutSettings?.stripeConnected ? '#ecfdf5' : '#f1f5f9',
+                          color: monetizationData?.payoutSettings?.stripeConnected ? '#059669' : '#64748b',
+                        }}
+                      >
+                        {monetizationData?.payoutSettings?.stripeConnected ? 'CONNECTED' : 'DISCONNECTED'}
+                      </span>
+                    </div>
+                    <span className="ed-settings-row__sub">
+                      Direct deposits into bank accounts across 135+ countries for tips and digital asset purchases.
+                    </span>
+                  </div>
+                  <Button
+                    loading={togglingStripe}
+                    onClick={handleToggleStripe}
+                    style={{ borderRadius: 10, fontWeight: 600, height: 38 }}
+                  >
+                    {monetizationData?.payoutSettings?.stripeConnected ? 'Disconnect Stripe' : 'Connect Stripe Express'}
+                  </Button>
+                </div>
+
+                {/* PayPal Tipping Payout Address */}
+                <div className="ed-settings-row" style={{ alignItems: 'flex-start' }}>
+                  <div className="ed-settings-row__info">
+                    <span className="ed-settings-row__label">PayPal Email for Author Tips</span>
+                    <span className="ed-settings-row__sub">
+                      Micro-tips sent by readers will be routed to this verified PayPal account.
+                    </span>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10, maxWidth: 400 }}>
+                      <Input
+                        placeholder="your-paypal-email@domain.com"
+                        value={paypalEmail}
+                        onChange={(e) => setPaypalEmail(e.target.value)}
+                        style={{ borderRadius: 8 }}
+                      />
+                      <Button
+                        type="primary"
+                        loading={savingPayout}
+                        onClick={handleSavePayoutSettings}
+                        style={{ borderRadius: 8 }}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* 6. Developer Platform & Webhooks */}
+            <section id="settings-developer" className="ed-settings-card">
+              <div className="ed-settings-card__head">
+                <div>
+                  <h2 className="ed-settings-card__title">Developer Platform & Webhooks</h2>
+                  <p className="ed-settings-card__desc">
+                    Manage Personal Access Tokens (PAT) for API automation and register outgoing webhooks.
+                  </p>
+                </div>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setIsPatModalVisible(true)}
+                  style={{ borderRadius: 10, fontWeight: 600 }}
+                >
+                  Generate Token
+                </Button>
+              </div>
+
+              <div className="ed-settings-card__body">
+                {/* Personal Access Tokens Table */}
+                <div className="ed-settings-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
+                  <div className="ed-settings-row__info">
+                    <span className="ed-settings-row__label">Personal Access Tokens</span>
+                    <span className="ed-settings-row__sub">
+                      Use Bearer tokens (<code>bsum_pat_...</code>) to authenticate with the BlogSum REST API.
+                    </span>
+                  </div>
+
+                  {patsData.length === 0 ? (
+                    <div style={{ padding: '14px 16px', background: '#f8fafc', borderRadius: 10, fontSize: 13, color: '#64748b' }}>
+                      No personal access tokens generated yet. Click "Generate Token" above.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {patsData.map((t) => (
+                        <div
+                          key={t.tokenId}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '12px 16px',
+                            background: '#f8fafc',
+                            borderRadius: 12,
+                            border: '1px solid #e2e8f0',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#0f172a' }}>{t.name}</div>
+                            <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                              <code>{t.tokenPrefix}</code> · Created {moment(t.createdAt).format('MMM D, YYYY')} · Scopes: {t.scopes.join(', ')}
+                            </div>
+                          </div>
+                          <Button
+                            danger
+                            size="small"
+                            loading={revokingTokenId === t.tokenId}
+                            onClick={() => handleRevokePAT(t.tokenId)}
+                            style={{ borderRadius: 6 }}
+                          >
+                            Revoke
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Outgoing Webhooks */}
+                <div className="ed-settings-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
+                  <div className="ed-settings-row__info">
+                    <span className="ed-settings-row__label">Outgoing Webhooks</span>
+                    <span className="ed-settings-row__sub">
+                      Receive instant HTTP POST callbacks signed with HMAC-SHA256 when you publish or update stories.
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, maxWidth: 600 }}>
+                    <Input
+                      placeholder="https://your-service.com/webhook"
+                      value={newWebhookUrl}
+                      onChange={(e) => setNewWebhookUrl(e.target.value)}
+                      style={{ borderRadius: 8 }}
+                    />
+                    <Button
+                      type="primary"
+                      loading={creatingWebhook}
+                      onClick={handleCreateWebhook}
+                      style={{ borderRadius: 8 }}
+                    >
+                      Add Webhook
+                    </Button>
+                  </div>
+
+                  {webhooksData.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                      {webhooksData.map((wh) => (
+                        <div
+                          key={wh.webhookId}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '12px 16px',
+                            background: '#f8fafc',
+                            borderRadius: 12,
+                            border: '1px solid #e2e8f0',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{wh.url}</div>
+                            <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                              Events: {wh.events.join(', ')} · Status: {wh.lastStatusCode ? `HTTP ${wh.lastStatusCode}` : 'Never fired'}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <Button
+                              size="small"
+                              loading={testingWebhookId === wh.webhookId}
+                              onClick={() => handleTestWebhook(wh.webhookId)}
+                              style={{ borderRadius: 6 }}
+                            >
+                              Test Ping
+                            </Button>
+                            <Button
+                              danger
+                              size="small"
+                              loading={deletingWebhookId === wh.webhookId}
+                              onClick={() => handleDeleteWebhook(wh.webhookId)}
+                              style={{ borderRadius: 6 }}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
@@ -1155,6 +1822,88 @@ function Settings() {
         )}
       </Modal>
 
+      {/* Create PAT Modal */}
+      <Modal
+        title="Generate Personal Access Token"
+        open={isPatModalVisible}
+        onCancel={() => setIsPatModalVisible(false)}
+        onOk={handleCreatePAT}
+        confirmLoading={creatingPat}
+        okText="Generate Token"
+        centered
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 10 }}>
+          <div>
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>Token Name</label>
+            <Input
+              placeholder="e.g. CI/CD Static Site Exporter"
+              value={patName}
+              onChange={(e) => setPatName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>Access Scopes</label>
+            <Select
+              mode="multiple"
+              value={patScopes}
+              onChange={(v) => setPatScopes(v)}
+              style={{ width: '100%' }}
+              options={[
+                { value: 'stories:read', label: 'stories:read (Read stories and drafts)' },
+                { value: 'stories:write', label: 'stories:write (Publish & edit stories)' },
+                { value: 'analytics:read', label: 'analytics:read (View analytics & engagement)' },
+                { value: 'profile:write', label: 'profile:write (Update bio and profile)' },
+              ]}
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* One-time Token Reveal Modal */}
+      <Modal
+        title="Personal Access Token Generated"
+        open={isTokenRevealModalVisible}
+        onCancel={() => setIsTokenRevealModalVisible(false)}
+        footer={[
+          <Button key="close" type="primary" onClick={() => setIsTokenRevealModalVisible(false)}>
+            I have saved this token
+          </Button>,
+        ]}
+        centered
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ color: '#dc2626', fontWeight: 600, margin: 0 }}>
+            Make sure to copy your Personal Access Token now. You will not be able to see it again!
+          </p>
+          <div
+            style={{
+              padding: '12px 14px',
+              background: '#f1f5f9',
+              borderRadius: 8,
+              fontFamily: 'monospace',
+              fontSize: 13,
+              wordBreak: 'break-all',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}
+          >
+            <span>{createdRawToken}</span>
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={() => {
+                navigator.clipboard?.writeText(createdRawToken);
+                message.success('Token copied to clipboard!');
+              }}
+            >
+              Copy
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* 2FA Disable Confirmation Modal */}
       <Modal
         title={null}
@@ -1400,6 +2149,88 @@ function Settings() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* Create PAT Modal */}
+      <Modal
+        title="Generate Personal Access Token"
+        open={isPatModalVisible}
+        onCancel={() => setIsPatModalVisible(false)}
+        onOk={handleCreatePAT}
+        confirmLoading={creatingPat}
+        okText="Generate Token"
+        centered
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 10 }}>
+          <div>
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>Token Name</label>
+            <Input
+              placeholder="e.g. CI/CD Static Site Exporter"
+              value={patName}
+              onChange={(e) => setPatName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>Access Scopes</label>
+            <Select
+              mode="multiple"
+              value={patScopes}
+              onChange={(v) => setPatScopes(v)}
+              style={{ width: '100%' }}
+              options={[
+                { value: 'stories:read', label: 'stories:read (Read stories and drafts)' },
+                { value: 'stories:write', label: 'stories:write (Publish & edit stories)' },
+                { value: 'analytics:read', label: 'analytics:read (View analytics & engagement)' },
+                { value: 'profile:write', label: 'profile:write (Update bio and profile)' },
+              ]}
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* One-time Token Reveal Modal */}
+      <Modal
+        title="Personal Access Token Generated"
+        open={isTokenRevealModalVisible}
+        onCancel={() => setIsTokenRevealModalVisible(false)}
+        footer={[
+          <Button key="close" type="primary" onClick={() => setIsTokenRevealModalVisible(false)}>
+            I have saved this token
+          </Button>,
+        ]}
+        centered
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ color: '#dc2626', fontWeight: 600, margin: 0 }}>
+            Make sure to copy your Personal Access Token now. You will not be able to see it again!
+          </p>
+          <div
+            style={{
+              padding: '12px 14px',
+              background: '#f1f5f9',
+              borderRadius: 8,
+              fontFamily: 'monospace',
+              fontSize: 13,
+              wordBreak: 'break-all',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}
+          >
+            <span>{createdRawToken}</span>
+            <Button
+              size="small"
+              icon={<CopyOutlined />}
+              onClick={() => {
+                navigator.clipboard?.writeText(createdRawToken);
+                message.success('Token copied to clipboard!');
+              }}
+            >
+              Copy
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       <style>{`

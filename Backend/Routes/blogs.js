@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Blog = require('../Models/Blog');
-const { protect } = require('../MiddleWares/authMiddleWare');
+const { protect, optionalAuth } = require('../MiddleWares/authMiddleWare');
 const {
   getBlogs,
   getBlogById,
@@ -17,6 +17,16 @@ const {
   likeComment,
   getBookmarkedBlogs,
   getProfileUserBlogs,
+  autoSaveDraft,
+  getBlogRevisions,
+  restoreBlogRevision,
+  aiCopilotHandler,
+  getForYouFeed,
+  getRssFeed,
+  generateAuthorRssFeed,
+  generateCategoryRssFeed,
+  generateOgImage,
+  generateBlogAudio,
   upload,
 } = require('../controllers/blogController');
 
@@ -29,9 +39,19 @@ router.route('/')
   .get(getBlogs)
   .post(protect, uploadFields, createBlog);
 
+router.get('/feed/for-you', optionalAuth, getForYouFeed);
+router.get('/feed/rss.xml', getRssFeed);
+router.get('/feed/author/:username.xml', generateAuthorRssFeed);
+router.get('/feed/category/:category.xml', generateCategoryRssFeed);
+router.get('/:id/og-image', generateOgImage);
 router.get('/user/blogs', protect, getUserBlogs); 
-
-router.get('/otherBlogs/:id',protect, getProfileUserBlogs)
+router.get('/bookmarked', protect, getBookmarkedBlogs);
+router.put('/draft-autosave', protect, autoSaveDraft);
+router.post('/ai-assist', protect, aiCopilotHandler);
+router.get('/:id/revisions', protect, getBlogRevisions);
+router.post('/:id/revisions/:revisionId/restore', protect, restoreBlogRevision);
+router.get('/otherBlogs/:id', protect, getProfileUserBlogs);
+router.post('/:id/generate-audio', optionalAuth, generateBlogAudio);
 
 router.get('/sitemap.xml', async (req, res) => {
   try {
@@ -76,12 +96,18 @@ router.route('/:id')
   .put(protect, uploadFields, updateBlog)
   .delete(protect, deleteBlog);
 
+router.post('/upload-comment-media', protect, upload.single('media'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'No media file provided' });
+  }
+  return res.json({ url: req.file.path, name: req.file.originalname });
+});
+
 router.route('/:id/like').put(protect, likeBlog);
 router.route('/:id/bookmark').put(protect, bookmarkBlog);
-router.route('/:id/comment').post(protect, commentOnBlog);
-router.route('/:id/comment/:commentId/reply').post(protect, replyToComment);
+router.route('/:id/comment').post(protect, upload.single('attachment'), commentOnBlog);
+router.route('/:id/comment/:commentId/reply').post(protect, upload.single('attachment'), replyToComment);
 router.route('/:id/comment/:commentId/like').put(protect, likeComment);
 router.route('/:id/share').put(protect, shareBlog);
-router.get('/bookmarked', protect, getBookmarkedBlogs);
 
 module.exports = router;

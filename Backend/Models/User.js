@@ -24,7 +24,87 @@ const userSchema = new mongoose.Schema({
   loginAttempts: { type: Number, default: 0 },
   lockUntil: { type: Date },
   bio: { type: String, default: '' },
-  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+  blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  sessions: [
+    {
+      sessionId: { type: String, required: true },
+      userAgent: { type: String, default: '' },
+      device: { type: String, default: 'Desktop' },
+      browser: { type: String, default: 'Browser' },
+      os: { type: String, default: 'OS' },
+      ip: { type: String, default: '' },
+      lastActive: { type: Date, default: Date.now },
+      createdAt: { type: Date, default: Date.now },
+    },
+  ],
+  pushSubscriptions: [
+    {
+      endpoint: { type: String, required: true },
+      expirationTime: { type: Number, default: null },
+      keys: {
+        p256dh: { type: String },
+        auth: { type: String },
+      },
+    },
+  ],
+  payoutSettings: {
+    stripeAccountId: { type: String, default: '' },
+    stripeConnected: { type: Boolean, default: false },
+    payoutMethod: {
+      type: String,
+      enum: ['paypal', 'stripe'],
+      default: 'paypal',
+    },
+    paypalEmail: { type: String, default: '' },
+  },
+  membership: {
+    tier: {
+      type: String,
+      enum: ['free', 'premium', 'supporter'],
+      default: 'free',
+    },
+    isActive: { type: Boolean, default: false },
+    validUntil: { type: Date, default: null },
+    monthlyMeteredCount: { type: Number, default: 0 },
+    meteredPeriodStart: { type: Date, default: Date.now },
+  },
+  securityAuditLogs: [
+    {
+      action: { type: String, required: true },
+      ip: { type: String, default: '' },
+      userAgent: { type: String, default: '' },
+      status: {
+        type: String,
+        enum: ['success', 'warning', 'failed'],
+        default: 'success',
+      },
+      timestamp: { type: Date, default: Date.now },
+    },
+  ],
+  personalAccessTokens: [
+    {
+      tokenId: { type: String, required: true },
+      name: { type: String, required: true },
+      tokenHash: { type: String, required: true },
+      tokenPrefix: { type: String, required: true },
+      scopes: [{ type: String }],
+      lastUsedAt: { type: Date, default: null },
+      expiresAt: { type: Date, default: null },
+      createdAt: { type: Date, default: Date.now },
+    },
+  ],
+  webhooks: [
+    {
+      webhookId: { type: String, required: true },
+      url: { type: String, required: true },
+      secret: { type: String, required: true },
+      events: [{ type: String }],
+      active: { type: Boolean, default: true },
+      createdAt: { type: Date, default: Date.now },
+      lastTriggeredAt: { type: Date, default: null },
+      lastStatusCode: { type: Number, default: null },
+    },
+  ],
 }, {
   timestamps: true
 });

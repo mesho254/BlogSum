@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Avatar, Tabs, Row, Col, message, Button, Skeleton, Empty } from 'antd';
 import {
@@ -12,6 +12,9 @@ import {
   TeamOutlined,
   UserOutlined,
   ArrowLeftOutlined,
+  ArrowRightOutlined,
+  LeftOutlined,
+  RightOutlined,
   FolderOutlined,
   ReadOutlined,
 } from '@ant-design/icons';
@@ -28,6 +31,94 @@ const OtherProfile = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const [activeTabKey, setActiveTabKey] = useState('1');
+  const tabsWrapperRef = useRef(null);
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(false);
+  const isDraggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const scrollLeftRef = useRef(0);
+  const hasMovedRef = useRef(false);
+
+  const updateScrollArrows = () => {
+    const el = tabsWrapperRef.current;
+    if (!el) return;
+    const canScrollLeft = el.scrollLeft > 6;
+    const canScrollRight = el.scrollLeft < el.scrollWidth - el.clientWidth - 6;
+    setShowLeftArrow(canScrollLeft);
+    setShowRightArrow(canScrollRight);
+  };
+
+  const scrollTabs = (direction) => {
+    if (tabsWrapperRef.current) {
+      const offset = direction === 'left' ? -240 : 240;
+      tabsWrapperRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    const el = tabsWrapperRef.current;
+    if (!el) return;
+
+    updateScrollArrows();
+
+    const onScroll = () => updateScrollArrows();
+    const onResize = () => updateScrollArrows();
+
+    const onWheel = (e) => {
+      if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+        updateScrollArrows();
+      }
+    };
+
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onWheel);
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tabsWrapperRef.current) {
+      const activeEl = tabsWrapperRef.current.querySelector('.ed-profile-tab-pill.active');
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+      setTimeout(updateScrollArrows, 350);
+    }
+  }, [activeTabKey]);
+
+  const handleMouseDown = (e) => {
+    if (!tabsWrapperRef.current) return;
+    isDraggingRef.current = true;
+    hasMovedRef.current = false;
+    startXRef.current = e.pageX - tabsWrapperRef.current.offsetLeft;
+    scrollLeftRef.current = tabsWrapperRef.current.scrollLeft;
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDraggingRef.current || !tabsWrapperRef.current) return;
+    const x = e.pageX - tabsWrapperRef.current.offsetLeft;
+    const walk = (x - startXRef.current) * 1.4;
+    if (Math.abs(walk) > 4) {
+      hasMovedRef.current = true;
+    }
+    tabsWrapperRef.current.scrollLeft = scrollLeftRef.current - walk;
+    updateScrollArrows();
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+  };
+
+  const handleMouseLeave = () => {
+    isDraggingRef.current = false;
+  };
 
   const profileQuery = useQuery({
     queryKey: ['otherProfile', id],
@@ -194,10 +285,11 @@ const OtherProfile = () => {
         {blogsList.map((blog) => (
           <Col
             xs={24}
-            sm={12}
+            sm={24}
             md={12}
             lg={8}
-            xl={6}
+            xl={8}
+            xxl={6}
             key={blog._id}
             style={{ display: 'flex' }}
           >
@@ -227,35 +319,32 @@ const OtherProfile = () => {
     return (
       <Row gutter={[16, 16]}>
         {peopleList.map((person) => (
-          <Col xs={24} sm={12} md={8} lg={6} xl={6} key={person._id}>
+          <Col xs={24} sm={24} md={12} lg={8} xl={6} key={person._id}>
             <AuthorHoverCard author={person}>
               <Link
                 to={`/profile/${person._id}`}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '14px 18px',
-                  background: '#ffffff',
-                  borderRadius: '16px',
-                  border: '1px solid #e2e8f0',
-                  textDecoration: 'none',
-                  width: '100%',
-                }}
+                className="ed-people-card"
               >
-                <Avatar
-                  size={46}
-                  src={person.profilePicture}
-                  style={{ backgroundColor: '#4f46e5', fontWeight: 700 }}
-                >
-                  {person.username?.[0]?.toUpperCase()}
-                </Avatar>
-                <div>
-                  <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '14.5px' }}>
-                    {person.username}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0 }}>
+                  <Avatar
+                    size={48}
+                    src={person.profilePicture}
+                    style={{ backgroundColor: '#4f46e5', fontWeight: 700, flexShrink: 0 }}
+                  >
+                    {person.username?.[0]?.toUpperCase()}
+                  </Avatar>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="ed-people-card-name">
+                      {person.username}
+                    </div>
+                    <div className="ed-people-card-bio">
+                      {person.bio || 'Author on BlogSum'}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>View creator profile</div>
                 </div>
+                <span className="ed-people-card-pill">
+                  View <ArrowRightOutlined style={{ fontSize: 11 }} />
+                </span>
               </Link>
             </AuthorHoverCard>
           </Col>
@@ -268,6 +357,7 @@ const OtherProfile = () => {
     {
       key: '1',
       title: 'Articles',
+      shortTitle: 'Articles',
       icon: <FileTextOutlined />,
       count: userBlogs.length,
       label: (
@@ -280,6 +370,7 @@ const OtherProfile = () => {
     {
       key: 'series',
       title: 'Collections',
+      shortTitle: 'Series',
       icon: <FolderOutlined />,
       count: authorSeries.length,
       label: (
@@ -356,6 +447,7 @@ const OtherProfile = () => {
     {
       key: '2',
       title: 'Liked Stories',
+      shortTitle: 'Liked',
       icon: <HeartOutlined />,
       count: likedBlogs.length,
       label: (
@@ -368,6 +460,7 @@ const OtherProfile = () => {
     {
       key: '3',
       title: 'Following',
+      shortTitle: 'Following',
       icon: <UserOutlined />,
       count: profile.following?.length || 0,
       label: (
@@ -380,6 +473,7 @@ const OtherProfile = () => {
     {
       key: '4',
       title: 'Followers',
+      shortTitle: 'Followers',
       icon: <TeamOutlined />,
       count: profile.followers?.length || 0,
       label: (
@@ -392,7 +486,7 @@ const OtherProfile = () => {
   ];
 
   return (
-    <div style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '60px' }}>
+    <div style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '90px' }}>
       <Navbar />
       <div className="ed-profile-container">
         <Button
@@ -586,6 +680,32 @@ const OtherProfile = () => {
                     {profile.location || 'Location not set'}
                   </span>
                 </div>
+
+                {profile.badges && profile.badges.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                    {profile.badges.map((b) => (
+                      <span
+                        key={b.key}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '3px 10px',
+                          borderRadius: '999px',
+                          fontSize: '11.5px',
+                          fontWeight: 700,
+                          color: b.color,
+                          background: b.bg,
+                          border: `1px solid ${b.color}25`,
+                        }}
+                        title={b.description}
+                      >
+                        <span>✦</span>
+                        <span>{b.label}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Modern Unified Stats Ribbon */}
@@ -614,31 +734,71 @@ const OtherProfile = () => {
           </div>
         </div>
 
-        {/* Bespoke Modern Editorial Segmented Tab Bar */}
-        <div className="ed-profile-tabs-wrapper">
-          <div className="ed-profile-tabs-nav" role="tablist">
-            {tabItems.map((tab) => {
-              const isActive = activeTabKey === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  onClick={() => setActiveTabKey(tab.key)}
-                  className={`ed-profile-tab-pill ${isActive ? 'active' : ''}`}
-                >
-                  <span className="ed-profile-tab-icon">{tab.icon}</span>
-                  <span className="ed-profile-tab-text">{tab.title}</span>
-                  {typeof tab.count === 'number' && (
-                    <span className={`ed-profile-tab-count ${isActive ? 'active' : ''}`}>
-                      {tab.count}
+        {/* Bespoke Modern Editorial Segmented Tab Bar with Arrow & Drag Navigation */}
+        <div className="ed-profile-tabs-outer">
+          {showLeftArrow && (
+            <button
+              type="button"
+              className="ed-tabs-scroll-arrow left"
+              onClick={() => scrollTabs('left')}
+              title="Scroll left"
+              aria-label="Scroll left"
+            >
+              <LeftOutlined />
+            </button>
+          )}
+
+          <div
+            className="ed-profile-tabs-wrapper"
+            ref={tabsWrapperRef}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+          >
+            <div className="ed-profile-tabs-nav" role="tablist">
+              {tabItems.map((tab) => {
+                const isActive = activeTabKey === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    onClick={(e) => {
+                      if (hasMovedRef.current) return;
+                      setActiveTabKey(tab.key);
+                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                    }}
+                    className={`ed-profile-tab-pill ${isActive ? 'active' : ''}`}
+                  >
+                    <span className="ed-profile-tab-icon">{tab.icon}</span>
+                    <span className="ed-profile-tab-text">
+                      <span className="ed-tab-label-full">{tab.title}</span>
+                      <span className="ed-tab-label-short">{tab.shortTitle}</span>
                     </span>
-                  )}
-                </button>
-              );
-            })}
+                    {typeof tab.count === 'number' && (
+                      <span className={`ed-profile-tab-count ${isActive ? 'active' : ''}`}>
+                        {tab.count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
+
+          {showRightArrow && (
+            <button
+              type="button"
+              className="ed-tabs-scroll-arrow right"
+              onClick={() => scrollTabs('right')}
+              title="Scroll right"
+              aria-label="Scroll right"
+            >
+              <RightOutlined />
+            </button>
+          )}
         </div>
 
         {/* Active Tab Panel */}
@@ -705,14 +865,72 @@ const OtherProfile = () => {
             background: #e2e8f0;
             pointer-events: none;
           }
-          .ed-profile-tabs-wrapper {
+          .ed-profile-tabs-outer {
+            position: relative;
+            width: 100%;
             margin-bottom: 28px;
+            display: flex;
+            align-items: center;
+          }
+          .ed-profile-tabs-wrapper {
+            width: 100%;
             overflow-x: auto;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-            padding: 4px 0;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            padding: 6px 4px 12px 4px;
+            scroll-behavior: smooth;
+            cursor: grab;
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e1 transparent;
+          }
+          .ed-profile-tabs-wrapper:active {
+            cursor: grabbing;
           }
           .ed-profile-tabs-wrapper::-webkit-scrollbar {
+            height: 4px;
+          }
+          .ed-profile-tabs-wrapper::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          .ed-profile-tabs-wrapper::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 999px;
+          }
+          .ed-tabs-scroll-arrow {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 20;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid #e2e8f0;
+            background: #ffffff;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+          }
+          .ed-tabs-scroll-arrow:hover {
+            background: #0f172a;
+            color: #ffffff;
+            border-color: #0f172a;
+            transform: translateY(-50%) scale(1.08);
+          }
+          .ed-tabs-scroll-arrow.left {
+            left: -14px;
+          }
+          .ed-tabs-scroll-arrow.right {
+            right: -14px;
+          }
+          .ed-tab-label-full {
+            display: inline;
+          }
+          .ed-tab-label-short {
             display: none;
           }
           .ed-profile-tabs-nav {
@@ -724,7 +942,9 @@ const OtherProfile = () => {
             border-radius: 16px;
             border: 1px solid #e2e8f0;
             box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
-            max-width: 100%;
+            width: max-content;
+            min-width: min-content;
+            flex-shrink: 0;
           }
           .ed-profile-tab-pill {
             display: inline-flex;
@@ -741,6 +961,8 @@ const OtherProfile = () => {
             white-space: nowrap;
             transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
             font-family: inherit;
+            flex-shrink: 0;
+            user-select: none;
           }
           .ed-profile-tab-pill:hover:not(.active) {
             color: #0f172a;
@@ -883,6 +1105,144 @@ const OtherProfile = () => {
             align-items: center;
             gap: 8px;
             margin-top: auto;
+          }
+
+          /* Modern People/Creator Cards */
+          .ed-people-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 18px;
+            background: #ffffff;
+            border-radius: 16px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+            text-decoration: none;
+            width: 100%;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            box-sizing: border-box;
+          }
+          .ed-people-card:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.08);
+            transform: translateY(-2px);
+          }
+          .ed-people-card-name {
+            font-weight: 700;
+            color: #0f172a;
+            font-size: 14.5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .ed-people-card-bio {
+            font-size: 12px;
+            color: #64748b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 2px;
+          }
+          .ed-people-card-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            border-radius: 999px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            color: #475569;
+            font-size: 11.5px;
+            font-weight: 600;
+            flex-shrink: 0;
+            transition: all 0.2s ease;
+          }
+          .ed-people-card:hover .ed-people-card-pill {
+            background: #0f172a;
+            color: #ffffff;
+            border-color: #0f172a;
+          }
+
+          /* Tablet & Laptop Responsive Pill Tab Bar */
+          @media (max-width: 1350px) {
+            .ed-tab-label-full {
+              display: none;
+            }
+            .ed-tab-label-short {
+              display: inline;
+            }
+            .ed-profile-tabs-nav {
+              gap: 5px;
+              padding: 5px;
+            }
+            .ed-profile-tab-pill {
+              padding: 7px 12px;
+              font-size: 13px;
+              gap: 6px;
+            }
+          }
+
+          /* Mobile Responsive Tweaks */
+          @media (max-width: 768px) {
+            .ed-tabs-scroll-arrow {
+              display: none;
+            }
+            .ed-profile-container {
+              width: 95%;
+              padding-top: 84px;
+            }
+            .ed-profile-tabs-wrapper {
+              margin-bottom: 20px;
+              padding-bottom: 8px;
+              cursor: default;
+              scrollbar-width: none;
+            }
+            .ed-profile-tabs-wrapper::-webkit-scrollbar {
+              display: none;
+            }
+            .ed-profile-tabs-nav {
+              gap: 4px;
+              padding: 4px;
+              border-radius: 14px;
+            }
+            .ed-profile-tab-pill {
+              padding: 6px 11px;
+              font-size: 12px;
+              gap: 5px;
+              border-radius: 9px;
+            }
+            .ed-profile-tab-icon {
+              font-size: 13px;
+            }
+            .ed-profile-tab-count {
+              height: 18px;
+              min-width: 18px;
+              font-size: 10.5px;
+              padding: 0 5px;
+            }
+            .ed-profile-stats-ribbon {
+              width: 100%;
+              overflow-x: auto;
+              -webkit-overflow-scrolling: touch;
+              scrollbar-width: none;
+              display: flex;
+              justify-content: flex-start;
+            }
+            .ed-profile-stats-ribbon::-webkit-scrollbar {
+              display: none;
+            }
+            .ed-stat-item-btn {
+              min-width: 68px;
+              padding: 6px 8px;
+              flex: 1 0 auto;
+            }
+            .ed-stat-value {
+              font-size: 16px;
+            }
+            .ed-stat-label {
+              font-size: 9.5px;
+            }
           }
 
           /* Responsive Wide Container for 23" / 27" Monitors */

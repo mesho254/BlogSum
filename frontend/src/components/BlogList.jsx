@@ -6,7 +6,7 @@ import {
   AppstoreOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import BlogCard from './BlogCard';
 import axiosInstance from '../axiosConfig';
@@ -31,6 +31,7 @@ const ALL_CATEGORIES = [
 ];
 
 const SORT_OPTIONS = [
+  { key: 'ForYou', label: 'For You' },
   { key: 'Newest', label: 'Newest' },
   { key: 'Popular', label: 'Popular' },
   { key: 'Oldest', label: 'Oldest' },
@@ -56,6 +57,8 @@ const BlogList = () => {
   const [selectedTag, setSelectedTag] = useState(() => searchParams.get('tag') || '');
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [selectedSort, setSelectedSort] = useState('Newest');
+  const [readTimeFilter, setReadTimeFilter] = useState('all'); // 'all' | 'short' | 'medium' | 'long'
+  const [minReactionsFilter, setMinReactionsFilter] = useState(0); // 0 | 5 | 10
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const searchInputRef = useRef(null);
@@ -106,6 +109,15 @@ const BlogList = () => {
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchInterval: 60 * 1000,
+  });
+
+  const { data: publications = [] } = useQuery({
+    queryKey: ['curatedPublications'],
+    queryFn: async () => {
+      const response = await axiosInstance.get('/api/publications');
+      return response.data || [];
+    },
+    staleTime: 60 * 1000,
   });
 
   // Never display draft or future-scheduled blogs on the public feed
@@ -186,7 +198,44 @@ const BlogList = () => {
       );
     }
 
+    if (readTimeFilter === 'short') {
+      filtered = filtered.filter((b) => (Number(b.readTime) || 3) < 5);
+    } else if (readTimeFilter === 'medium') {
+      filtered = filtered.filter((b) => (Number(b.readTime) || 3) >= 5 && (Number(b.readTime) || 3) <= 10);
+    } else if (readTimeFilter === 'long') {
+      filtered = filtered.filter((b) => (Number(b.readTime) || 3) > 10);
+    }
+
+    if (minReactionsFilter > 0) {
+      filtered = filtered.filter((b) => (b.likes?.length || b.likesCount || 0) >= minReactionsFilter);
+    }
+
     filtered.sort((a, b) => {
+      if (selectedSort === 'ForYou') {
+        const now = Date.now();
+        const dateA = new Date(a.publishDate || a.date).getTime();
+        const dateB = new Date(b.publishDate || b.date).getTime();
+        const hrsA = Math.max(0.1, (now - dateA) / 3600000);
+        const hrsB = Math.max(0.1, (now - dateB) / 3600000);
+
+        const scoreA =
+          ((a.likes?.length || a.likesCount || 0) * 2 +
+            (a.comments?.length || 0) * 3 +
+            (a.sharesCount || 0) * 4 +
+            (a.isFeatured ? 20 : 0) +
+            5) /
+          Math.pow(hrsA + 2, 1.4);
+
+        const scoreB =
+          ((b.likes?.length || b.likesCount || 0) * 2 +
+            (b.comments?.length || 0) * 3 +
+            (b.sharesCount || 0) * 4 +
+            (b.isFeatured ? 20 : 0) +
+            5) /
+          Math.pow(hrsB + 2, 1.4);
+
+        if (scoreB !== scoreA) return scoreB - scoreA;
+      }
       if (selectedSort === 'Popular') {
         const scoreA = (a.likes?.length || 0) * 2 + (a.comments?.length || 0) + (a.bookmarks?.length || 0);
         const scoreB = (b.likes?.length || 0) * 2 + (b.comments?.length || 0) + (b.bookmarks?.length || 0);
@@ -239,6 +288,8 @@ const BlogList = () => {
     setSelectedTag('');
     setSearchQuery('');
     setSelectedSort('Newest');
+    setReadTimeFilter('all');
+    setMinReactionsFilter(0);
     setVisibleCount(INITIAL_BATCH);
     if (searchParams.has('tag')) {
       const nextParams = new URLSearchParams(searchParams);
@@ -289,6 +340,8 @@ const BlogList = () => {
     selectedCategory !== 'All' ||
     Boolean(selectedTag) ||
     Boolean(searchQuery.trim()) ||
+    readTimeFilter !== 'all' ||
+    minReactionsFilter > 0 ||
     selectedSort !== 'Newest';
 
   return (
@@ -330,6 +383,26 @@ const BlogList = () => {
           )}
         </div>
       </div>
+
+      {/* Curated Publications Strip */}
+      {publications.length > 0 && (
+        <div className="bloglist-ed-pubs-strip">
+          <span className="bloglist-ed-pubs-label">Featured Publications:</span>
+          <div className="bloglist-ed-pubs-list">
+            {publications.map((pub) => (
+              <Link
+                key={pub._id}
+                to={`/p/${pub.slug}`}
+                className="bloglist-ed-pub-pill"
+              >
+                {pub.logo && <img src={pub.logo} alt={pub.name} className="bloglist-ed-pub-logo" />}
+                <span className="bloglist-ed-pub-name">{pub.name}</span>
+                <span className="bloglist-ed-pub-count">{pub.stories?.length || 0} stories</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Hairline Editorial Navigation & Sort Bar */}
       <div className="bloglist-ed-nav">
@@ -426,6 +499,52 @@ const BlogList = () => {
         </div>
       )}
 
+      {/* Faceted Filter Bar: Read Time & Minimum Reactions */}
+      <div className="bloglist-ed-facets">
+        <div className="bloglist-ed-facet-group">
+          <span className="bloglist-ed-facet-label">Read Time:</span>
+          {[
+            { key: 'all', label: 'All Lengths' },
+            { key: 'short', label: '< 5 min' },
+            { key: 'medium', label: '5–10 min' },
+            { key: 'long', label: '10+ min' },
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => {
+                setReadTimeFilter(item.key);
+                setVisibleCount(INITIAL_BATCH);
+              }}
+              className={`bloglist-ed-facet-pill ${readTimeFilter === item.key ? 'is-active' : ''}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="bloglist-ed-facet-group">
+          <span className="bloglist-ed-facet-label">Reactions:</span>
+          {[
+            { count: 0, label: 'Any' },
+            { count: 5, label: '5+ ❤️' },
+            { count: 10, label: '10+ ❤️' },
+          ].map((item) => (
+            <button
+              key={item.count}
+              type="button"
+              onClick={() => {
+                setMinReactionsFilter(item.count);
+                setVisibleCount(INITIAL_BATCH);
+              }}
+              className={`bloglist-ed-facet-pill ${minReactionsFilter === item.count ? 'is-active' : ''}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Active Filter Summary Bar */}
       {hasActiveFilters && (
         <div className="bloglist-ed-status">
@@ -496,10 +615,11 @@ const BlogList = () => {
               {displayedBlogs.map((blog) => (
                 <Col
                   xs={24}
-                  sm={12}
+                  sm={24}
                   md={12}
                   lg={8}
-                  xl={6}
+                  xl={8}
+                  xxl={6}
                   key={blog._id}
                   style={{ display: 'flex' }}
                 >
@@ -715,6 +835,65 @@ const BlogList = () => {
           font-size: 10.5px;
           opacity: 0.7;
         }
+        .bloglist-ed-pubs-strip {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 24px;
+          flex-wrap: wrap;
+          padding: 8px 12px;
+          background: #f8fafc;
+          border-radius: 16px;
+          border: 1px solid #e2e8f0;
+        }
+        .bloglist-ed-pubs-label {
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          color: #94a3b8;
+        }
+        .bloglist-ed-pubs-list {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .bloglist-ed-pub-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 14px;
+          border-radius: 999px;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          color: #0f172a;
+          text-decoration: none;
+          font-size: 13px;
+          font-weight: 600;
+          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+          transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .bloglist-ed-pub-pill:hover {
+          border-color: #cbd5e1;
+          box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+          transform: translateY(-1px);
+          color: #4f46e5;
+        }
+        .bloglist-ed-pub-logo {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          object-fit: cover;
+        }
+        .bloglist-ed-pub-count {
+          font-size: 11px;
+          font-weight: 700;
+          color: #64748b;
+          background: #f1f5f9;
+          padding: 2px 7px;
+          border-radius: 999px;
+        }
         .bloglist-ed-tabs {
           display: flex;
           align-items: center;
@@ -808,6 +987,49 @@ const BlogList = () => {
           padding-bottom: 20px;
           font-size: 13px;
           color: #6b7280;
+        }
+        .bloglist-ed-facets {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          flex-wrap: wrap;
+          padding: 4px 0 14px;
+          border-bottom: 1px dashed #e2e8f0;
+          margin-bottom: 16px;
+        }
+        .bloglist-ed-facet-group {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .bloglist-ed-facet-label {
+          font-size: 11px;
+          font-weight: 700;
+          color: #94a3b8;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          margin-right: 2px;
+        }
+        .bloglist-ed-facet-pill {
+          padding: 3px 10px;
+          border-radius: 999px;
+          border: 1px solid #e2e8f0;
+          background: #f8fafc;
+          color: #475569;
+          font-size: 11.5px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .bloglist-ed-facet-pill:hover {
+          background: #eef2ff;
+          color: #4f46e5;
+          border-color: #c7d2fe;
+        }
+        .bloglist-ed-facet-pill.is-active {
+          background: #0f172a;
+          color: #ffffff;
+          border-color: #0f172a;
         }
         .bloglist-ed-reset {
           border: none;

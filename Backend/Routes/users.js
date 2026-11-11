@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { protect, admin } = require('../MiddleWares/authMiddleWare');
+const { protect, admin, optionalAuth } = require('../MiddleWares/authMiddleWare');
 const {
+  searchUsersForMention,
   getUserProfile,
   getUserById,
   updateUserProfile,
@@ -23,10 +24,21 @@ const {
   getBlogShareCount,
   getBlockStatus,
   exportUserData,
+  getPayoutAndMembership,
+  updatePayoutSettings,
+  connectStripeAccount,
+  updateMembership,
 } = require('../controllers/userController');
 const { getDeletionPreview, deleteMyAccount } = require('../controllers/accountController');
 
+router.get('/mention-search', optionalAuth, searchUsersForMention);
 router.get('/export-my-data', protect, exportUserData);
+
+// Creator Monetization, Stripe Connect & Membership Tiers
+router.get('/payout-and-membership', protect, getPayoutAndMembership);
+router.put('/payout-settings', protect, updatePayoutSettings);
+router.post('/stripe-connect', protect, connectStripeAccount);
+router.post('/membership-tier', protect, updateMembership);
 
 // GDPR Article 17 — self-service account deletion
 router.get('/me/deletion-preview', protect, getDeletionPreview);

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Avatar, Button, Input, List, Popover, Popconfirm, Tooltip } from 'antd';
+import { Link } from 'react-router-dom';
+import AuthorHoverCard from '../AuthorHoverCard';
 import {
   FaUser,
   FaThumbtack,
@@ -18,6 +20,93 @@ import data from '@emoji-mart/data';
 import moment from 'moment';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '👏', '🎉'];
+
+export const renderFormattedMessageText = (text, isMe) => {
+  if (!text) return null;
+
+  const combinedRegex = /(!\[[^\]]*\]\([^\)]+\)|\[[^\]]+\]\([^\)]+\)|@[a-zA-Z0-9_]+|https?:\/\/[^\s<]+)/g;
+  const parts = String(text || '').split(combinedRegex);
+
+  return parts.map((part, index) => {
+    if (!part) return null;
+
+    // 1. @mention with AuthorHoverCard
+    if (part.startsWith('@')) {
+      const username = part.slice(1);
+      return (
+        <AuthorHoverCard key={index} author={username}>
+          <Link
+            to={`/profile/${username}`}
+            style={{
+              color: isMe ? '#ffffff' : '#4f46e5',
+              background: isMe ? 'rgba(255, 255, 255, 0.28)' : '#eef2ff',
+              fontWeight: 700,
+              padding: '1px 6px',
+              borderRadius: '6px',
+              display: 'inline-block',
+              margin: '0 2px',
+              textDecoration: 'none',
+              cursor: 'pointer',
+              border: isMe ? '1px solid rgba(255, 255, 255, 0.45)' : '1px solid #c7d2fe',
+              transition: 'all 0.15s ease',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            title={`@${username} (hover for author preview)`}
+          >
+            {part}
+          </Link>
+        </AuthorHoverCard>
+      );
+    }
+
+    // 2. Markdown link [text](url)
+    const linkMatch = part.match(/^\[(.*?)\]\((.*?)\)$/);
+    if (linkMatch) {
+      const linkText = linkMatch[1];
+      const url = linkMatch[2];
+      return (
+        <a
+          key={index}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: isMe ? '#e0e7ff' : '#2563eb',
+            fontWeight: 600,
+            textDecoration: 'underline',
+            wordBreak: 'break-all',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {linkText || url}
+        </a>
+      );
+    }
+
+    // 3. Raw URL
+    if (/^https?:\/\//i.test(part)) {
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: isMe ? '#e0e7ff' : '#2563eb',
+            fontWeight: 600,
+            textDecoration: 'underline',
+            wordBreak: 'break-all',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {part}
+        </a>
+      );
+    }
+
+    return part;
+  });
+};
 
 const MessageItem = ({
   msg,
@@ -395,7 +484,10 @@ const MessageItem = ({
                 marginBottom: msg.message ? 8 : 2,
                 borderRadius: 12,
                 display: 'block',
+                cursor: 'pointer',
               }}
+              onClick={() => window.open(msg.fileUrl, '_blank')}
+              title="Click to view full image in new tab"
             />
           )}
 
@@ -426,7 +518,9 @@ const MessageItem = ({
             </div>
           ) : (
             msg.message && (
-              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>{msg.message}</p>
+              <div style={{ margin: 0, fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {renderFormattedMessageText(msg.message, isMe)}
+              </div>
             )
           )}
 

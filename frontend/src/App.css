@@ -79,6 +79,12 @@ html, body {
   }
 }
 
+@media (min-width: 2560px) {
+  .modern-navbar-inner {
+    max-width: 2160px;
+  }
+}
+
 .modern-navbar.scrolled .modern-navbar-inner {
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 14px 36px -10px rgba(15, 23, 42, 0.12),

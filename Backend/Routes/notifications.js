@@ -19,4 +19,8 @@ router.delete('/:id', protect, notificationController.deleteNotification);
 // Mark all notifications as read for a user
 router.put('/read/all', protect, notificationController.markAllAsRead);
 
+// Web Push Notification Subscriptions
+router.get('/vapid-public-key', notificationController.getVapidPublicKey);
+router.post('/push-subscribe', protect, notificationController.subscribeToPush);
+
 module.exports = router;

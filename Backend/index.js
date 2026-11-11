@@ -23,6 +23,9 @@ const subscribeRoutes = require('./Routes/subscribe');
 const adminRoutes = require('./Routes/admin');
 const seriesRoutes = require('./Routes/series');
 const tipRoutes = require('./Routes/tips');
+const readingListRoutes = require('./Routes/readingLists');
+const publicationRoutes = require('./Routes/publications');
+const developerRoutes = require('./Routes/developer');
 const cors = require('cors');
 
 dotenv.config();
@@ -246,6 +249,9 @@ mongoose.connect(process.env.MONGO_URI, {
     refreshBlogsCache().catch((err) => console.error('Initial blog cache warm-up failed:', err));
     // Start node-cron job (every 30s) to auto-publish scheduled blogs & send notifications
     startScheduledBlogsCron(io, '*/30 * * * * *');
+    // Start automated Sunday Weekly Digest job
+    const { initWeeklyDigestCron } = require('./Utils/weeklyDigestEngine');
+    initWeeklyDigestCron();
   })
   .catch(err => console.error(err));
 
@@ -259,6 +265,9 @@ app.use('/api/subscribe', submissionLimiter, subscribeRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/series', seriesRoutes);
 app.use('/api/tips', tipRoutes);
+app.use('/api/reading-lists', readingListRoutes);
+app.use('/api/publications', publicationRoutes);
+app.use('/api/developer', developerRoutes);
 
 // Public SEO Endpoints
 app.get('/robots.txt', (req, res) => {

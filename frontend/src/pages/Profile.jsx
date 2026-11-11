@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import axiosInstance from '../axiosConfig';
 import BlogCard from '../components/BlogCard';
 import {
@@ -40,6 +40,10 @@ import {
   ArrowUpOutlined,
   ArrowDownOutlined,
   ReadOutlined,
+  GlobalOutlined,
+  ArrowRightOutlined,
+  LeftOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import Navbar from '../components/NavBar';
 import useAuth from '../hooks/useAuth';
@@ -55,6 +59,94 @@ function Profile() {
   const [previewImage, setPreviewImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeTabKey, setActiveTabKey] = useState('1');
+  const tabsWrapperRef = useRef(null);
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(false);
+  const isDraggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const scrollLeftRef = useRef(0);
+  const hasMovedRef = useRef(false);
+
+  const updateScrollArrows = () => {
+    const el = tabsWrapperRef.current;
+    if (!el) return;
+    const canScrollLeft = el.scrollLeft > 6;
+    const canScrollRight = el.scrollLeft < el.scrollWidth - el.clientWidth - 6;
+    setShowLeftArrow(canScrollLeft);
+    setShowRightArrow(canScrollRight);
+  };
+
+  const scrollTabs = (direction) => {
+    if (tabsWrapperRef.current) {
+      const offset = direction === 'left' ? -240 : 240;
+      tabsWrapperRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    const el = tabsWrapperRef.current;
+    if (!el) return;
+
+    updateScrollArrows();
+
+    const onScroll = () => updateScrollArrows();
+    const onResize = () => updateScrollArrows();
+
+    const onWheel = (e) => {
+      if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+        updateScrollArrows();
+      }
+    };
+
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onWheel);
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tabsWrapperRef.current) {
+      const activeEl = tabsWrapperRef.current.querySelector('.ed-profile-tab-pill.active');
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+      setTimeout(updateScrollArrows, 350);
+    }
+  }, [activeTabKey]);
+
+  const handleMouseDown = (e) => {
+    if (!tabsWrapperRef.current) return;
+    isDraggingRef.current = true;
+    hasMovedRef.current = false;
+    startXRef.current = e.pageX - tabsWrapperRef.current.offsetLeft;
+    scrollLeftRef.current = tabsWrapperRef.current.scrollLeft;
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDraggingRef.current || !tabsWrapperRef.current) return;
+    const x = e.pageX - tabsWrapperRef.current.offsetLeft;
+    const walk = (x - startXRef.current) * 1.4;
+    if (Math.abs(walk) > 4) {
+      hasMovedRef.current = true;
+    }
+    tabsWrapperRef.current.scrollLeft = scrollLeftRef.current - walk;
+    updateScrollArrows();
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+  };
+
+  const handleMouseLeave = () => {
+    isDraggingRef.current = false;
+  };
   const [seriesModalVisible, setSeriesModalVisible] = useState(false);
   const [editingSeries, setEditingSeries] = useState(null);
   const [seriesTitle, setSeriesTitle] = useState('');
@@ -100,6 +192,24 @@ function Profile() {
     },
     enabled: Boolean(user?._id),
   });
+
+  const readingListsQuery = useQuery({
+    queryKey: ['userReadingLists'],
+    queryFn: async () => {
+      const { data } = await axiosInstance.get('/api/reading-lists', {
+        headers: { Authorization: `Bearer ${user?.token}` },
+      });
+      return data || [];
+    },
+    enabled: Boolean(user?.token),
+  });
+
+  const [createListModalVisible, setCreateListModalVisible] = useState(false);
+  const [newListName, setNewListName] = useState('');
+  const [newListDesc, setNewListDesc] = useState('');
+  const [newListPrivate, setNewListPrivate] = useState(false);
+  const [creatingList, setCreatingList] = useState(false);
+  const [selectedReadingList, setSelectedReadingList] = useState(null);
 
   if (
     postedQuery.isLoading ||
@@ -248,10 +358,11 @@ function Profile() {
         {blogsList.map((blog) => (
           <Col
             xs={24}
-            sm={12}
+            sm={24}
             md={12}
             lg={8}
-            xl={6}
+            xl={8}
+            xxl={6}
             key={blog._id}
             style={{ display: 'flex' }}
           >
@@ -281,35 +392,32 @@ function Profile() {
     return (
       <Row gutter={[16, 16]}>
         {peopleList.map((person) => (
-          <Col xs={24} sm={12} md={8} lg={6} xl={6} key={person._id}>
+          <Col xs={24} sm={24} md={12} lg={8} xl={6} key={person._id}>
             <AuthorHoverCard author={person}>
               <Link
                 to={`/profile/${person._id}`}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '14px 18px',
-                  background: '#ffffff',
-                  borderRadius: '16px',
-                  border: '1px solid #e2e8f0',
-                  textDecoration: 'none',
-                  width: '100%',
-                }}
+                className="ed-people-card"
               >
-                <Avatar
-                  size={46}
-                  src={person.profilePicture}
-                  style={{ backgroundColor: '#4f46e5', fontWeight: 700 }}
-                >
-                  {person.username?.[0]?.toUpperCase()}
-                </Avatar>
-                <div>
-                  <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '14.5px' }}>
-                    {person.username}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0 }}>
+                  <Avatar
+                    size={48}
+                    src={person.profilePicture}
+                    style={{ backgroundColor: '#4f46e5', fontWeight: 700, flexShrink: 0 }}
+                  >
+                    {person.username?.[0]?.toUpperCase()}
+                  </Avatar>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="ed-people-card-name">
+                      {person.username}
+                    </div>
+                    <div className="ed-people-card-bio">
+                      {person.bio || 'Author on BlogSum'}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>View creator profile</div>
                 </div>
+                <span className="ed-people-card-pill">
+                  View <ArrowRightOutlined style={{ fontSize: 11 }} />
+                </span>
               </Link>
             </AuthorHoverCard>
           </Col>
@@ -392,10 +500,11 @@ function Profile() {
           {scheduledOrDraftBlogs.map((blog) => (
             <Col
               xs={24}
-              sm={12}
+              sm={24}
               md={12}
               lg={8}
-              xl={6}
+              xl={8}
+              xxl={6}
               key={blog._id}
               style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
             >
@@ -665,10 +774,333 @@ function Profile() {
     );
   };
 
+  const handleCreateReadingList = async () => {
+    if (!newListName.trim()) {
+      message.warning('Please enter a list name');
+      return;
+    }
+    setCreatingList(true);
+    try {
+      await axiosInstance.post(
+        '/api/reading-lists',
+        {
+          name: newListName.trim(),
+          description: newListDesc.trim(),
+          isPrivate: newListPrivate,
+        },
+        { headers: { Authorization: `Bearer ${user.token}` } }
+      );
+      message.success(`Created reading list "${newListName}"`);
+      setNewListName('');
+      setNewListDesc('');
+      setCreateListModalVisible(false);
+      queryClient.invalidateQueries(['userReadingLists']);
+    } catch (err) {
+      message.error(err.response?.data?.message || 'Failed to create list');
+    } finally {
+      setCreatingList(false);
+    }
+  };
+
+  const handleDeleteReadingList = async (listId, listName) => {
+    try {
+      await axiosInstance.delete(`/api/reading-lists/${listId}`, {
+        headers: { Authorization: `Bearer ${user.token}` },
+      });
+      message.success(`Deleted reading list "${listName}"`);
+      if (selectedReadingList?._id === listId) {
+        setSelectedReadingList(null);
+      }
+      queryClient.invalidateQueries(['userReadingLists']);
+    } catch (err) {
+      message.error('Failed to delete list');
+    }
+  };
+
+  const renderReadingListsSection = () => {
+    const lists = readingListsQuery.data || [];
+
+    if (selectedReadingList) {
+      return (
+        <div>
+          <div style={{ marginBottom: 20 }}>
+            <Button
+              type="text"
+              onClick={() => setSelectedReadingList(null)}
+              style={{ fontWeight: 600, color: '#4f46e5', padding: '0 4px', marginBottom: 12 }}
+            >
+              ← Back to All Reading Lists
+            </Button>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                flexWrap: 'wrap',
+                gap: 12,
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, fontWeight: 800, color: '#0f172a', fontSize: '1.35rem' }}>
+                  {selectedReadingList.name}
+                </h3>
+                {selectedReadingList.description && (
+                  <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: '0.92rem' }}>
+                    {selectedReadingList.description}
+                  </p>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                  <span
+                    style={{
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      background: selectedReadingList.isPrivate ? '#fef2f2' : '#f0fdf4',
+                      color: selectedReadingList.isPrivate ? '#ef4444' : '#16a34a',
+                    }}
+                  >
+                    {selectedReadingList.isPrivate ? 'Private List' : 'Public List'}
+                  </span>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    {selectedReadingList.blogs?.length || 0} stories
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {renderBlogsGrid(
+            selectedReadingList.blogs || [],
+            'No stories added to this reading list yet. Browse stories and click "List" to add them.'
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '24px',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
+          <div>
+            <h3 style={{ margin: 0, fontWeight: 800, color: '#0f172a', fontSize: '1.25rem' }}>
+              Reading Lists & Bookmarks Folders ({lists.length})
+            </h3>
+            <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '0.9rem' }}>
+              Organize your saved articles into customized folders and reading queues.
+            </p>
+          </div>
+          <Button
+            type="primary"
+            icon={<FolderAddOutlined />}
+            onClick={() => setCreateListModalVisible(true)}
+            style={{
+              borderRadius: '999px',
+              fontWeight: 700,
+              height: '40px',
+              padding: '0 22px',
+              background: '#4f46e5',
+              borderColor: '#4f46e5',
+            }}
+          >
+            New Reading List
+          </Button>
+        </div>
+
+        {lists.length === 0 ? (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '60px 20px',
+              background: '#ffffff',
+              borderRadius: '16px',
+              border: '1px dashed #cbd5e1',
+            }}
+          >
+            <BookOutlined style={{ fontSize: 44, color: '#94a3b8', marginBottom: 16 }} />
+            <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+              No Reading Lists Yet
+            </h4>
+            <p style={{ color: '#64748b', maxWidth: 440, margin: '0 auto 20px', fontSize: '0.9rem' }}>
+              Create folders like "Read Later", "AI Research", or "Design Inspiration" to curate your reading journey.
+            </p>
+            <Button
+              type="primary"
+              icon={<FolderAddOutlined />}
+              onClick={() => setCreateListModalVisible(true)}
+              style={{
+                borderRadius: '999px',
+                fontWeight: 700,
+                background: '#4f46e5',
+                borderColor: '#4f46e5',
+              }}
+            >
+              Create Your First List
+            </Button>
+          </div>
+        ) : (
+          <Row gutter={[24, 24]}>
+            {lists.map((list) => (
+              <Col xs={24} sm={12} md={12} lg={8} xl={8} xxl={6} key={list._id}>
+                <div
+                  style={{
+                    background: '#ffffff',
+                    borderRadius: '16px',
+                    border: '1px solid #e2e8f0',
+                    padding: '20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    height: '100%',
+                    boxShadow: '0 2px 8px rgba(15, 23, 42, 0.04)',
+                    transition: 'transform 0.2s, box-shadow 0.2s',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div
+                      style={{
+                        width: 42,
+                        height: 42,
+                        borderRadius: 12,
+                        background: '#eef2ff',
+                        color: '#4f46e5',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 20,
+                      }}
+                    >
+                      <BookOutlined />
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        padding: '3px 9px',
+                        borderRadius: 999,
+                        background: list.isPrivate ? '#fef2f2' : '#f0fdf4',
+                        color: list.isPrivate ? '#ef4444' : '#16a34a',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      {list.isPrivate ? <LockOutlined /> : <GlobalOutlined />}
+                      {list.isPrivate ? 'Private' : 'Public'}
+                    </span>
+                  </div>
+
+                  <h4 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a', margin: '0 0 6px' }}>
+                    {list.name}
+                  </h4>
+                  <p
+                    style={{
+                      fontSize: '0.86rem',
+                      color: '#64748b',
+                      margin: '0 0 16px',
+                      flex: 1,
+                      overflow: 'hidden',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                    }}
+                  >
+                    {list.description || 'No description provided'}
+                  </p>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, borderTop: '1px solid #f1f5f9' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>
+                      {list.blogs?.length || 0} {list.blogs?.length === 1 ? 'story' : 'stories'}
+                    </span>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <Button
+                        size="small"
+                        onClick={() => setSelectedReadingList(list)}
+                        style={{ borderRadius: 8, fontWeight: 600 }}
+                      >
+                        View Stories
+                      </Button>
+                      <Popconfirm
+                        title="Delete reading list?"
+                        description="This folder will be removed. Stories inside will not be deleted."
+                        onConfirm={() => handleDeleteReadingList(list._id, list.name)}
+                        okText="Delete"
+                        cancelText="Cancel"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <Button
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          style={{ borderRadius: 8 }}
+                        />
+                      </Popconfirm>
+                    </div>
+                  </div>
+                </div>
+              </Col>
+            ))}
+          </Row>
+        )}
+
+        {/* Create List Modal */}
+        <Modal
+          title="Create New Reading List"
+          open={createListModalVisible}
+          onCancel={() => setCreateListModalVisible(false)}
+          onOk={handleCreateReadingList}
+          confirmLoading={creatingList}
+          okText="Create List"
+          centered
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 12 }}>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 4 }}>
+                List Name
+              </label>
+              <Input
+                placeholder="e.g. AI & LLM Systems, Weekend Reads"
+                value={newListName}
+                onChange={(e) => setNewListName(e.target.value)}
+                maxLength={80}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 700, color: '#334155', display: 'block', marginBottom: 4 }}>
+                Description (optional)
+              </label>
+              <Input.TextArea
+                placeholder="What kind of articles belong in this list?"
+                value={newListDesc}
+                onChange={(e) => setNewListDesc(e.target.value)}
+                rows={3}
+                maxLength={240}
+              />
+            </div>
+            <Checkbox
+              checked={newListPrivate}
+              onChange={(e) => setNewListPrivate(e.target.checked)}
+            >
+              Make this reading list private (only visible to you)
+            </Checkbox>
+          </div>
+        </Modal>
+      </div>
+    );
+  };
+
   const tabItems = [
     {
       key: '1',
       title: 'My Posts',
+      shortTitle: 'Posts',
       icon: <FileTextOutlined />,
       count: postedBlogs.length,
       label: (
@@ -746,6 +1178,7 @@ function Profile() {
     {
       key: 'scheduled',
       title: 'Scheduled & Drafts',
+      shortTitle: 'Drafts',
       icon: <ClockCircleOutlined style={scheduledOrDraftBlogs.length > 0 ? { color: '#d97706' } : {}} />,
       count: scheduledOrDraftBlogs.length,
       label: (
@@ -759,6 +1192,7 @@ function Profile() {
     {
       key: 'series',
       title: 'Series & Collections',
+      shortTitle: 'Series',
       icon: <FolderOutlined />,
       count: userSeries.length,
       label: (
@@ -771,6 +1205,7 @@ function Profile() {
     {
       key: '2',
       title: 'Bookmarks',
+      shortTitle: 'Bookmarks',
       icon: <BookOutlined />,
       count: bookmarkedBlogs.length,
       label: (
@@ -781,8 +1216,22 @@ function Profile() {
       children: renderBlogsGrid(bookmarkedBlogs, 'No bookmarked articles yet.'),
     },
     {
+      key: 'reading-lists',
+      title: 'Reading Lists',
+      shortTitle: 'Lists',
+      icon: <BookOutlined />,
+      count: (readingListsQuery.data || []).length,
+      label: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+          <BookOutlined /> Reading Lists ({(readingListsQuery.data || []).length})
+        </span>
+      ),
+      children: renderReadingListsSection(),
+    },
+    {
       key: '3',
       title: 'Liked',
+      shortTitle: 'Liked',
       icon: <HeartOutlined />,
       count: likedBlogs.length,
       label: (
@@ -795,6 +1244,7 @@ function Profile() {
     {
       key: '4',
       title: 'Following',
+      shortTitle: 'Following',
       icon: <UserOutlined />,
       count: profileData.following?.length || 0,
       label: (
@@ -807,6 +1257,7 @@ function Profile() {
     {
       key: '5',
       title: 'Followers',
+      shortTitle: 'Followers',
       icon: <TeamOutlined />,
       count: profileData.followers?.length || 0,
       label: (
@@ -819,7 +1270,7 @@ function Profile() {
   ];
 
   return (
-    <div style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '60px' }}>
+    <div style={{ background: '#f8fafc', minHeight: '100vh', paddingBottom: '90px' }}>
       <Navbar />
       <div className="ed-profile-container">
         {/* Modern Editorial Profile Header Card */}
@@ -1004,6 +1455,32 @@ function Profile() {
                     {profileData.location || 'Location not set'}
                   </span>
                 </div>
+
+                {profileData.badges && profileData.badges.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '10px' }}>
+                    {profileData.badges.map((b) => (
+                      <span
+                        key={b.key}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '3px 10px',
+                          borderRadius: '999px',
+                          fontSize: '11.5px',
+                          fontWeight: 700,
+                          color: b.color,
+                          background: b.bg,
+                          border: `1px solid ${b.color}25`,
+                        }}
+                        title={b.description}
+                      >
+                        <span>✦</span>
+                        <span>{b.label}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Modern Unified Stats Ribbon */}
@@ -1011,6 +1488,7 @@ function Profile() {
                 {[
                   { label: 'Articles', value: postedBlogs.length, targetKey: '1' },
                   { label: 'Series', value: userSeries.length, targetKey: 'series' },
+                  { label: 'Lists', value: (readingListsQuery.data || []).length, targetKey: 'reading-lists' },
                   { label: 'Followers', value: profileData.followers?.length || 0, targetKey: '5' },
                   { label: 'Following', value: profileData.following?.length || 0, targetKey: '4' },
                   { label: 'Likes', value: totalLikesReceived, targetKey: '3' },
@@ -1032,31 +1510,71 @@ function Profile() {
           </div>
         </div>
 
-        {/* Bespoke Modern Editorial Segmented Tab Bar */}
-        <div className="ed-profile-tabs-wrapper">
-          <div className="ed-profile-tabs-nav" role="tablist">
-            {tabItems.map((tab) => {
-              const isActive = activeTabKey === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  onClick={() => setActiveTabKey(tab.key)}
-                  className={`ed-profile-tab-pill ${isActive ? 'active' : ''}`}
-                >
-                  <span className="ed-profile-tab-icon">{tab.icon}</span>
-                  <span className="ed-profile-tab-text">{tab.title}</span>
-                  {typeof tab.count === 'number' && (
-                    <span className={`ed-profile-tab-count ${isActive ? 'active' : ''}`}>
-                      {tab.count}
+        {/* Bespoke Modern Editorial Segmented Tab Bar with Arrow & Drag Navigation */}
+        <div className="ed-profile-tabs-outer">
+          {showLeftArrow && (
+            <button
+              type="button"
+              className="ed-tabs-scroll-arrow left"
+              onClick={() => scrollTabs('left')}
+              title="Scroll left"
+              aria-label="Scroll left"
+            >
+              <LeftOutlined />
+            </button>
+          )}
+
+          <div
+            className="ed-profile-tabs-wrapper"
+            ref={tabsWrapperRef}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+          >
+            <div className="ed-profile-tabs-nav" role="tablist">
+              {tabItems.map((tab) => {
+                const isActive = activeTabKey === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    onClick={(e) => {
+                      if (hasMovedRef.current) return;
+                      setActiveTabKey(tab.key);
+                      e.currentTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                    }}
+                    className={`ed-profile-tab-pill ${isActive ? 'active' : ''}`}
+                  >
+                    <span className="ed-profile-tab-icon">{tab.icon}</span>
+                    <span className="ed-profile-tab-text">
+                      <span className="ed-tab-label-full">{tab.title}</span>
+                      <span className="ed-tab-label-short">{tab.shortTitle}</span>
                     </span>
-                  )}
-                </button>
-              );
-            })}
+                    {typeof tab.count === 'number' && (
+                      <span className={`ed-profile-tab-count ${isActive ? 'active' : ''}`}>
+                        {tab.count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
+
+          {showRightArrow && (
+            <button
+              type="button"
+              className="ed-tabs-scroll-arrow right"
+              onClick={() => scrollTabs('right')}
+              title="Scroll right"
+              aria-label="Scroll right"
+            >
+              <RightOutlined />
+            </button>
+          )}
         </div>
 
         {/* Active Tab Panel */}
@@ -1723,14 +2241,72 @@ function Profile() {
             background: #e2e8f0;
             pointer-events: none;
           }
-          .ed-profile-tabs-wrapper {
+          .ed-profile-tabs-outer {
+            position: relative;
+            width: 100%;
             margin-bottom: 28px;
+            display: flex;
+            align-items: center;
+          }
+          .ed-profile-tabs-wrapper {
+            width: 100%;
             overflow-x: auto;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-            padding: 4px 0;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            padding: 6px 4px 12px 4px;
+            scroll-behavior: smooth;
+            cursor: grab;
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e1 transparent;
+          }
+          .ed-profile-tabs-wrapper:active {
+            cursor: grabbing;
           }
           .ed-profile-tabs-wrapper::-webkit-scrollbar {
+            height: 4px;
+          }
+          .ed-profile-tabs-wrapper::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          .ed-profile-tabs-wrapper::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 999px;
+          }
+          .ed-tabs-scroll-arrow {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 20;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid #e2e8f0;
+            background: #ffffff;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+          }
+          .ed-tabs-scroll-arrow:hover {
+            background: #0f172a;
+            color: #ffffff;
+            border-color: #0f172a;
+            transform: translateY(-50%) scale(1.08);
+          }
+          .ed-tabs-scroll-arrow.left {
+            left: -14px;
+          }
+          .ed-tabs-scroll-arrow.right {
+            right: -14px;
+          }
+          .ed-tab-label-full {
+            display: inline;
+          }
+          .ed-tab-label-short {
             display: none;
           }
           .ed-profile-tabs-nav {
@@ -1742,7 +2318,9 @@ function Profile() {
             border-radius: 16px;
             border: 1px solid #e2e8f0;
             box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
-            max-width: 100%;
+            width: max-content;
+            min-width: min-content;
+            flex-shrink: 0;
           }
           .ed-profile-tab-pill {
             display: inline-flex;
@@ -1759,6 +2337,8 @@ function Profile() {
             white-space: nowrap;
             transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
             font-family: inherit;
+            flex-shrink: 0;
+            user-select: none;
           }
           .ed-profile-tab-pill:hover:not(.active) {
             color: #0f172a;
@@ -1901,6 +2481,144 @@ function Profile() {
             align-items: center;
             gap: 8px;
             margin-top: auto;
+          }
+
+          /* Modern People/Creator Cards */
+          .ed-people-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 18px;
+            background: #ffffff;
+            border-radius: 16px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+            text-decoration: none;
+            width: 100%;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            box-sizing: border-box;
+          }
+          .ed-people-card:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.08);
+            transform: translateY(-2px);
+          }
+          .ed-people-card-name {
+            font-weight: 700;
+            color: #0f172a;
+            font-size: 14.5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .ed-people-card-bio {
+            font-size: 12px;
+            color: #64748b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 2px;
+          }
+          .ed-people-card-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            border-radius: 999px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            color: #475569;
+            font-size: 11.5px;
+            font-weight: 600;
+            flex-shrink: 0;
+            transition: all 0.2s ease;
+          }
+          .ed-people-card:hover .ed-people-card-pill {
+            background: #0f172a;
+            color: #ffffff;
+            border-color: #0f172a;
+          }
+
+          /* Tablet & Laptop Responsive Pill Tab Bar */
+          @media (max-width: 1350px) {
+            .ed-tab-label-full {
+              display: none;
+            }
+            .ed-tab-label-short {
+              display: inline;
+            }
+            .ed-profile-tabs-nav {
+              gap: 5px;
+              padding: 5px;
+            }
+            .ed-profile-tab-pill {
+              padding: 7px 12px;
+              font-size: 13px;
+              gap: 6px;
+            }
+          }
+
+          /* Mobile Responsive Tweaks */
+          @media (max-width: 768px) {
+            .ed-tabs-scroll-arrow {
+              display: none;
+            }
+            .ed-profile-container {
+              width: 95%;
+              padding-top: 84px;
+            }
+            .ed-profile-tabs-wrapper {
+              margin-bottom: 20px;
+              padding-bottom: 8px;
+              cursor: default;
+              scrollbar-width: none;
+            }
+            .ed-profile-tabs-wrapper::-webkit-scrollbar {
+              display: none;
+            }
+            .ed-profile-tabs-nav {
+              gap: 4px;
+              padding: 4px;
+              border-radius: 14px;
+            }
+            .ed-profile-tab-pill {
+              padding: 6px 11px;
+              font-size: 12px;
+              gap: 5px;
+              border-radius: 9px;
+            }
+            .ed-profile-tab-icon {
+              font-size: 13px;
+            }
+            .ed-profile-tab-count {
+              height: 18px;
+              min-width: 18px;
+              font-size: 10.5px;
+              padding: 0 5px;
+            }
+            .ed-profile-stats-ribbon {
+              width: 100%;
+              overflow-x: auto;
+              -webkit-overflow-scrolling: touch;
+              scrollbar-width: none;
+              display: flex;
+              justify-content: flex-start;
+            }
+            .ed-profile-stats-ribbon::-webkit-scrollbar {
+              display: none;
+            }
+            .ed-stat-item-btn {
+              min-width: 68px;
+              padding: 6px 8px;
+              flex: 1 0 auto;
+            }
+            .ed-stat-value {
+              font-size: 16px;
+            }
+            .ed-stat-label {
+              font-size: 9.5px;
+            }
           }
 
           /* Responsive Wide Container for 23" / 27" Monitors */

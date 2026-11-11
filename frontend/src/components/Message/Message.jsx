@@ -52,6 +52,7 @@ const Message = ({ isWidget = false }) => {
   const [message, setMessage] = useState('');
   const [file, setFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
+  const [gifUrl, setGifUrl] = useState(null);
   const [socket, setSocket] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -443,8 +444,8 @@ const Message = ({ isWidget = false }) => {
   };
 
   const sendMessage = async (e) => {
-    e.preventDefault();
-    if (!selectedItem || (!message.trim() && !file)) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!selectedItem || (!message.trim() && !file && !gifUrl)) {
       return;
     }
     const tempId = Date.now().toString();
@@ -457,7 +458,7 @@ const Message = ({ isWidget = false }) => {
       deliveredTo: [],
       readBy: [],
       status: 'sending',
-      fileUrl: filePreview || null,
+      fileUrl: filePreview || gifUrl || null,
       reactions: [],
       replyTo: replyingTo ? replyingTo._id : null,
       forwardedFrom: null,
@@ -465,10 +466,12 @@ const Message = ({ isWidget = false }) => {
     setMessages((prevMessages) => [...prevMessages, tempMessage]);
     const sentText = message;
     const sentFile = file;
+    const sentGif = gifUrl;
     const sentReply = replyingTo;
     setMessage('');
     setFile(null);
     setFilePreview(null);
+    setGifUrl(null);
     setReplyingTo(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = null;
@@ -485,6 +488,8 @@ const Message = ({ isWidget = false }) => {
       }
       if (sentFile) {
         formData.append('attachment', sentFile);
+      } else if (sentGif) {
+        formData.append('fileUrl', sentGif);
       }
       const { data } = await axiosInstance.post('/api/messages', formData, {
         headers: {
@@ -673,6 +678,7 @@ const Message = ({ isWidget = false }) => {
   const removeFile = () => {
     setFile(null);
     setFilePreview(null);
+    setGifUrl(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = null;
     }
@@ -973,6 +979,8 @@ const Message = ({ isWidget = false }) => {
                   setMessage={setMessage}
                   filePreview={filePreview}
                   file={file}
+                  gifUrl={gifUrl}
+                  setGifUrl={setGifUrl}
                   removeFile={removeFile}
                   showPicker={showPicker}
                   setShowPicker={setShowPicker}
@@ -981,6 +989,8 @@ const Message = ({ isWidget = false }) => {
                   sendMessage={sendMessage}
                   replyingTo={replyingTo}
                   setReplyingTo={setReplyingTo}
+                  selectedItem={selectedItem}
+                  users={users}
                 />
               )}
             </>

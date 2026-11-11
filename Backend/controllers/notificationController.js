@@ -1,4 +1,6 @@
 const Notification = require('../Models/Notification'); // adjust the path as necessary
+const User = require('../Models/User');
+const { getVapidPublicKey, sendWebPushToUser } = require('../Utils/pushNotifier');
 
 // Get all notifications for a user
 exports.getNotifications = async (req, res) => {
@@ -68,6 +70,45 @@ exports.deleteNotification = async (req, res) => {
     res.json({ message: 'Notification deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error });
+  }
+};
+
+exports.getVapidPublicKey = (req, res) => {
+  res.json({ publicKey: getVapidPublicKey() });
+};
+
+exports.subscribeToPush = async (req, res) => {
+  try {
+    const { subscription } = req.body;
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({ message: 'Valid subscription object is required' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (!Array.isArray(user.pushSubscriptions)) {
+      user.pushSubscriptions = [];
+    }
+
+    const exists = user.pushSubscriptions.some((s) => s.endpoint === subscription.endpoint);
+    if (!exists) {
+      user.pushSubscriptions.push(subscription);
+      await user.save();
+    }
+
+    sendWebPushToUser(req.user._id, {
+      title: 'BlogSum Notifications Enabled',
+      body: 'You will receive instant alerts when your favorite authors publish.',
+      url: '/notifications',
+    }).catch(() => {});
+
+    res.json({ success: true, message: 'Push subscription registered successfully' });
+  } catch (error) {
+    console.error('Error saving push subscription:', error);
+    res.status(500).json({ message: 'Failed to register push subscription' });
   }
 };
 

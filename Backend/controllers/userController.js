@@ -1,9 +1,11 @@
+const mongoose = require('mongoose');
 const User = require('../Models/User');
 const Blog = require('../Models/Blog');
 const cloudinary = require('../config/cloudinary');
 const Notification = require('../Models/Notification')
 const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const { evaluateUserBadges } = require('../Utils/badgeEvaluator');
 
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
@@ -18,16 +20,21 @@ const upload = multer({ storage: storage });
 
 const getUserProfile = async (req, res) => {
   const user = await User.findById(req.user._id).select('-password')
-  .populate('followers', 'username profilePicture')
-  .populate('following', 'username profilePicture');
+    .populate('followers', 'username profilePicture bio location')
+    .populate('following', 'username profilePicture bio location')
+    .lean();
+  if (user) {
+    const authorBlogs = await Blog.find({ author: user._id }).select('status likes comments publishDate date').lean();
+    user.badges = evaluateUserBadges(user, authorBlogs);
+  }
   res.json(user);
 };
 
 const getOtherUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password')
-      .populate('followers', 'username profilePicture')
-      .populate('following', 'username profilePicture')
+      .populate('followers', 'username profilePicture bio location')
+      .populate('following', 'username profilePicture bio location')
       .populate('likedBlogs', 'title')
       .populate('bookmarkedBlogs', 'title')
       .populate('messages', 'content');
@@ -46,15 +53,20 @@ const getOtherUserProfile = async (req, res) => {
 
 const getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('-password')
-    .populate('followers', 'username profilePicture')
+    const isObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+    const query = isObjectId ? { _id: req.params.id } : { username: { $regex: `^${req.params.id}$`, $options: 'i' } };
+    const user = await User.findOne(query).select('-password')
+      .populate('followers', 'username profilePicture')
       .populate('following', 'username profilePicture')
       .populate('likedBlogs', 'title')
       .populate('bookmarkedBlogs', 'title')
-      .populate('messages', 'content');;
+      .populate('messages', 'content')
+      .lean();
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
+    const authorBlogs = await Blog.find({ author: user._id }).select('status likes comments publishDate date').lean();
+    user.badges = evaluateUserBadges(user, authorBlogs);
     res.json(user);
   } catch (error) {
     console.error('Error fetching user by ID:', error);
@@ -102,56 +114,81 @@ const updateUserProfile = async (req, res) => {
   });
 };
 
-const followUser = async (req, res) => {
-  const user = await User.findById(req.user._id);
-  const targetUser = await User.findById(req.params.id);
+const findUserByIdOrUsername = async (identifier) => {
+  if (!identifier) return null;
+  const isObjectId = mongoose.Types.ObjectId.isValid(identifier);
+  if (isObjectId) {
+    const user = await User.findById(identifier);
+    if (user) return user;
+  }
+  return await User.findOne({ username: { $regex: `^${identifier}$`, $options: 'i' } });
+};
 
-  if (!user.following.includes(targetUser._id)) {
-    user.following.push(targetUser._id);
-    targetUser.followers.push(user._id);
+const followUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    const targetUser = await findUserByIdOrUsername(req.params.id);
+    if (!targetUser) return res.status(404).json({ message: 'Target user not found' });
+
+    if (!user.following.some(f => String(f) === String(targetUser._id))) {
+      user.following.push(targetUser._id);
+      targetUser.followers.push(user._id);
+
+      await user.save();
+      await targetUser.save();
+
+      const notification = new Notification({
+        user: targetUser._id,
+        message: `${user.username} started following you`,
+      });
+
+      await notification.save();
+
+      try {
+        const io = req.app.get('io');
+        if (io) {
+          io.to(String(targetUser._id)).emit('newNotification', notification);
+        }
+      } catch (notifErr) {
+        console.error('Error emitting follow notification:', notifErr);
+      }
+    }
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to follow user' });
+  }
+};
+
+const unfollowUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    const targetUser = await findUserByIdOrUsername(req.params.id);
+    if (!targetUser) return res.status(404).json({ message: 'Target user not found' });
+
+    user.following = user.following.filter(f => f.toString() !== targetUser._id.toString());
+    targetUser.followers = targetUser.followers.filter(f => f.toString() !== user._id.toString());
 
     await user.save();
     await targetUser.save();
 
-    const notification = new Notification({
-      user: targetUser._id,
-      message: `${user.username} started following you`,
-    });
-
-    await notification.save();
-
-    try {
-      const io = req.app.get('io');
-      if (io) {
-        io.to(String(targetUser._id)).emit('newNotification', notification);
-      }
-    } catch (notifErr) {
-      console.error('Error emitting follow notification:', notifErr);
-    }
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to unfollow user' });
   }
-
-  res.json(user);
-};
-
-const unfollowUser = async (req, res) => {
-  const user = await User.findById(req.user._id);
-  const targetUser = await User.findById(req.params.id);
-
-  user.following = user.following.filter(f => f.toString() !== targetUser._id.toString());
-  targetUser.followers = targetUser.followers.filter(f => f.toString() !== user._id.toString());
-
-  await user.save();
-  await targetUser.save();
-
-  res.json(user);
 };
 
 const getFollowState = async (req, res) => {
-  const user = await User.findById(req.user._id);
-  const targetUser = await User.findById(req.params.id);
+  try {
+    const user = await User.findById(req.user._id);
+    const targetUser = await findUserByIdOrUsername(req.params.id);
+    if (!targetUser) return res.status(404).json({ message: 'Target user not found' });
 
-  const isFollowing = user.following.includes(targetUser._id);
-  res.json({ isFollowing });
+    const isFollowing = user.following.some(f => String(f) === String(targetUser._id));
+    res.json({ isFollowing });
+  } catch (err) {
+    res.status(500).json({ message: 'Error retrieving follow state' });
+  }
 };
 
 const blockUser = async (req, res) => {
@@ -316,22 +353,24 @@ const getBlogShareCount = async (req, res) => {
 
 const getPublicAuthorProfile = async (req, res) => {
   try {
-    const authorId = req.params.id;
-    const [user, authorBlogs] = await Promise.all([
-      User.findById(authorId)
-        .select('username email profilePicture location followers following likedBlogs')
-        .populate('followers', 'username profilePicture')
-        .populate('following', 'username profilePicture')
-        .lean(),
-      Blog.find({ author: authorId })
-        .select('title category date publishDate status readTime imageUrl likes reactions')
-        .sort({ date: -1 })
-        .lean(),
-    ]);
+    const rawId = req.params.id;
+    const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
+    const query = isObjectId ? { _id: rawId } : { username: { $regex: `^${rawId}$`, $options: 'i' } };
+
+    const user = await User.findOne(query)
+      .select('username email profilePicture location followers following likedBlogs')
+      .populate('followers', 'username profilePicture')
+      .populate('following', 'username profilePicture')
+      .lean();
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
+
+    const authorBlogs = await Blog.find({ author: user._id })
+      .select('title category date publishDate status readTime imageUrl likes reactions')
+      .sort({ date: -1 })
+      .lean();
 
     const now = new Date();
     const publishedAuthorBlogs = (authorBlogs || []).filter((b) => {
@@ -358,6 +397,7 @@ const getPublicAuthorProfile = async (req, res) => {
       followingCount: Array.isArray(user.following) ? user.following.length : 0,
       postsCount: publishedAuthorBlogs.length,
       totalLikesReceived,
+      badges: evaluateUserBadges(user, authorBlogs),
       recentBlogs: publishedAuthorBlogs.slice(0, 2),
     });
   } catch (error) {
@@ -401,7 +441,122 @@ const exportUserData = async (req, res) => {
   }
 };
 
+const getPayoutAndMembership = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('payoutSettings membership');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({
+      payoutSettings: user.payoutSettings || {
+        payoutMethod: 'paypal',
+        paypalEmail: '',
+        stripeConnected: false,
+        stripeAccountId: '',
+      },
+      membership: user.membership || {
+        tier: 'free',
+        isActive: false,
+        monthlyMeteredCount: 0,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Error retrieving monetization settings' });
+  }
+};
+
+const updatePayoutSettings = async (req, res) => {
+  try {
+    const { payoutMethod, paypalEmail } = req.body;
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (!user.payoutSettings) user.payoutSettings = {};
+    if (payoutMethod) user.payoutSettings.payoutMethod = payoutMethod;
+    if (typeof paypalEmail === 'string') user.payoutSettings.paypalEmail = paypalEmail.trim();
+
+    await user.save();
+    res.json({
+      success: true,
+      message: 'Payout settings updated successfully',
+      payoutSettings: user.payoutSettings,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update payout preferences' });
+  }
+};
+
+const connectStripeAccount = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (!user.payoutSettings) user.payoutSettings = {};
+    const isConnecting = !user.payoutSettings.stripeConnected;
+
+    user.payoutSettings.stripeConnected = isConnecting;
+    user.payoutSettings.stripeAccountId = isConnecting ? `acct_express_${user._id.toString().slice(-6)}` : '';
+    if (isConnecting) {
+      user.payoutSettings.payoutMethod = 'stripe';
+    }
+
+    await user.save();
+    res.json({
+      success: true,
+      message: isConnecting ? 'Stripe Connect Express account connected successfully!' : 'Stripe account disconnected',
+      payoutSettings: user.payoutSettings,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to toggle Stripe Connect account' });
+  }
+};
+
+const updateMembership = async (req, res) => {
+  try {
+    const { tier } = req.body;
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const targetTier = ['premium', 'supporter'].includes(tier) ? tier : 'free';
+    const isActive = targetTier !== 'free';
+
+    user.membership = {
+      tier: targetTier,
+      isActive,
+      validUntil: isActive ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null,
+      monthlyMeteredCount: user.membership?.monthlyMeteredCount || 0,
+      meteredPeriodStart: user.membership?.meteredPeriodStart || new Date(),
+    };
+
+    await user.save();
+    res.json({
+      success: true,
+      message: isActive ? `Upgraded to BlogSum ${targetTier.toUpperCase()} Member!` : 'Membership reset to Free reader tier.',
+      membership: user.membership,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update membership tier' });
+  }
+};
+
+const searchUsersForMention = async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const query = q
+      ? { username: { $regex: q, $options: 'i' }, isSuspended: { $ne: true } }
+      : { isSuspended: { $ne: true } };
+
+    const users = await User.find(query)
+      .select('username profilePicture roles bio isVerified')
+      .limit(8)
+      .lean();
+
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to search users for mentions' });
+  }
+};
+
 module.exports = {
+  searchUsersForMention,
   exportUserData,
   getUserProfile,
   getOtherUserProfile,
@@ -422,6 +577,10 @@ module.exports = {
   blockUser,
   unblockUser,
   getUser,
-  upload
+  upload,
+  getPayoutAndMembership,
+  updatePayoutSettings,
+  connectStripeAccount,
+  updateMembership,
 };
 

@@ -1,5 +1,7 @@
 const Message = require('../Models/Message');
 const Channel = require('../Models/Channel');
+const User = require('../Models/User');
+const Notification = require('../Models/Notification');
 const mongoose = require('mongoose');
 
 const sendMessage = async (req, res) => {
@@ -44,6 +46,39 @@ const sendMessage = async (req, res) => {
       io.to(req.user._id.toString()).emit('message', newMessage);
       io.to(receiverId.toString()).emit('message', newMessage);
     }
+
+    // Parse @mentions and notify mentioned users
+    if (newMessage.message && typeof newMessage.message === 'string') {
+      const mentionMatches = newMessage.message.match(/@([a-zA-Z0-9_]+)/g);
+      if (mentionMatches && mentionMatches.length > 0) {
+        const rawUsernames = Array.from(new Set(mentionMatches.map((m) => m.slice(1).toLowerCase())));
+        try {
+          const mentionedUsers = await User.find({
+            username: { $in: rawUsernames.map((u) => new RegExp(`^${u}$`, 'i')) },
+            _id: { $ne: req.user._id },
+          }).select('_id username');
+
+          let contextTitle = 'a direct message';
+          if (channelId) {
+            const ch = await Channel.findById(channelId).select('name');
+            if (ch?.name) contextTitle = `#${ch.name}`;
+          }
+
+          for (const targetUser of mentionedUsers) {
+            const notif = await Notification.create({
+              user: targetUser._id,
+              message: `@${req.user.username || 'Someone'} mentioned you in ${contextTitle}`,
+            });
+            if (io) {
+              io.to(String(targetUser._id)).emit('newNotification', notif);
+            }
+          }
+        } catch (notifErr) {
+          console.warn('Error creating message mention notification:', notifErr.message);
+        }
+      }
+    }
+
     res.json(newMessage);
   } catch (err) {
     console.error(err.message);

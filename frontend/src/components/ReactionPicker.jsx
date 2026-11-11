@@ -118,6 +118,7 @@ const ReactionPicker = ({
   size = 'default',
   className = '',
   buttonStyle = {},
+  showLabel,
 }) => {
   const [open, setOpen] = useState(false);
   const [hoveredReaction, setHoveredReaction] = useState(null);
@@ -160,6 +161,7 @@ const ReactionPicker = ({
   };
 
   const isCompact = size === 'small';
+  const shouldShowLabel = typeof showLabel === 'boolean' ? showLabel : !isCompact;
 
   return (
     <div
@@ -259,13 +261,17 @@ const ReactionPicker = ({
             display: 'inline-flex',
             alignItems: 'center',
             gap: '6px',
-            padding: isCompact ? '6px 12px' : '7px 14px',
+            padding: isCompact
+              ? shouldShowLabel
+                ? '6px 12px'
+                : '6px 8px'
+              : '7px 14px',
             borderRadius: '999px',
             border: activeConfig ? `1px solid ${activeConfig.border}` : '1px solid transparent',
             background: activeConfig ? activeConfig.bg : 'transparent',
             color: activeConfig ? activeConfig.color : '#64748b',
             fontWeight: activeConfig ? 700 : 600,
-            fontSize: isCompact ? '13px' : '13.5px',
+            fontSize: isCompact ? '12.5px' : '13.5px',
             cursor: 'pointer',
             transition: 'all 0.2s ease',
             outline: 'none',
@@ -304,15 +310,17 @@ const ReactionPicker = ({
               }}
             />
           )}
-          <span className="blog-reaction-label">{activeConfig ? activeConfig.label : 'Like'}</span>
+          {shouldShowLabel && (
+            <span className="blog-reaction-label">{activeConfig ? activeConfig.label : 'Like'}</span>
+          )}
           {likesCount > 0 && (
             <span
               className="blog-reaction-count"
               style={{
-                marginLeft: '2px',
-                padding: '1px 7px',
+                marginLeft: shouldShowLabel ? '2px' : '3px',
+                padding: '1px 6px',
                 borderRadius: '999px',
-                fontSize: '11.5px',
+                fontSize: '11px',
                 fontWeight: 700,
                 background: activeConfig ? 'rgba(255,255,255,0.85)' : '#f1f5f9',
                 color: activeConfig ? activeConfig.color : '#475569',

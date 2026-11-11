@@ -9,14 +9,96 @@ const crypto = require('crypto');
 const dotenv = require('dotenv');
 const { generateSecret, generateURI, verifySync } = require('otplib');
 const qrcode = require('qrcode');
-const { logAdminAction } = require('../Utils/auditLogger');
+const { logAdminAction, recordUserSecurityLog } = require('../Utils/auditLogger');
 
 
 dotenv.config()
 
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: '1d',  // Changed to 24 hours
+function parseUserAgent(ua = '') {
+  let device = 'Desktop';
+  if (/mobile/i.test(ua)) device = 'Mobile';
+  else if (/ipad|tablet/i.test(ua)) device = 'Tablet';
+
+  let browser = 'Browser';
+  if (/edg/i.test(ua)) browser = 'Microsoft Edge';
+  else if (/chrome/i.test(ua)) browser = 'Google Chrome';
+  else if (/firefox/i.test(ua)) browser = 'Mozilla Firefox';
+  else if (/safari/i.test(ua)) browser = 'Apple Safari';
+  else if (/opera|opr/i.test(ua)) browser = 'Opera';
+
+  let os = 'OS';
+  if (/windows/i.test(ua)) os = 'Windows';
+  else if (/macintosh|mac os x/i.test(ua)) os = 'macOS';
+  else if (/android/i.test(ua)) os = 'Android';
+  else if (/iphone|ipad|ipod/i.test(ua)) os = 'iOS';
+  else if (/linux/i.test(ua)) os = 'Linux';
+
+  return { device, browser, os };
+}
+
+const createAndTrackSession = async (user, req) => {
+  const sessionId = crypto.randomBytes(16).toString('hex');
+  const ua = req.headers['user-agent'] || '';
+  const ip = req.ip || req.connection?.remoteAddress || '';
+  const { device, browser, os } = parseUserAgent(ua);
+
+  if (!Array.isArray(user.sessions)) {
+    user.sessions = [];
+  }
+
+  // Keep up to 10 most recent active sessions
+  user.sessions.unshift({
+    sessionId,
+    userAgent: ua.slice(0, 200),
+    device,
+    browser,
+    os,
+    ip: String(ip).slice(0, 45),
+    lastActive: new Date(),
+    createdAt: new Date(),
+  });
+
+  if (user.sessions.length > 10) {
+    user.sessions = user.sessions.slice(0, 10);
+  }
+
+  await user.save();
+  return sessionId;
+};
+
+const generateAccessToken = (id, sessionId = '') => {
+  return jwt.sign({ id, sessionId, type: 'access' }, process.env.JWT_SECRET, {
+    expiresIn: '15m', // 15 minutes
+  });
+};
+
+const generateRefreshToken = (id, sessionId = '') => {
+  const secret = process.env.JWT_REFRESH_SECRET || (process.env.JWT_SECRET + '_refresh_secret_key_v1');
+  return jwt.sign({ id, sessionId, type: 'refresh' }, secret, {
+    expiresIn: '7d', // 7 days
+  });
+};
+
+// Backward-compatible alias
+const generateToken = generateAccessToken;
+
+const setAuthCookies = (res, accessToken, refreshToken) => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  // 15-minute Access Token cookie
+  res.cookie('token', accessToken, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 15 * 60 * 1000,
+  });
+  // 7-day Refresh Token cookie
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 };
 
@@ -43,13 +125,15 @@ const registerUser = async (req, res) => {
     roles: initialRole,
   });
   if (user) {
-    const token = generateToken(user._id);
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',  // Secure in production
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60 * 1000  // 24 hours
+    const sessionId = await createAndTrackSession(user, req);
+    const accessToken = generateAccessToken(user._id, sessionId);
+    const refreshToken = generateRefreshToken(user._id, sessionId);
+    recordUserSecurityLog(user._id, {
+      action: 'Account registered and signed in',
+      req,
+      status: 'success',
     });
+    setAuthCookies(res, accessToken, refreshToken);
     res.status(201).json({
       _id: user._id,
       username: user.username,
@@ -57,7 +141,9 @@ const registerUser = async (req, res) => {
       roles: user.roles,
       isVerified: Boolean(user.isVerified),
       profilePicture: user.profilePicture || '',
-      token,  // Still send in JSON for localStorage
+      token: accessToken,  // Still send in JSON for localStorage
+      accessToken,
+      refreshToken,
     });
   } else {
     res.status(400).json({ message: 'Invalid user data' });
@@ -115,13 +201,15 @@ const authUser = async (req, res) => {
       });
     }
 
-    const token = generateToken(user._id);
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60 * 1000,
+    const sessionId = await createAndTrackSession(user, req);
+    const accessToken = generateAccessToken(user._id, sessionId);
+    const refreshToken = generateRefreshToken(user._id, sessionId);
+    recordUserSecurityLog(user._id, {
+      action: 'Signed in successfully via password',
+      req,
+      status: 'success',
     });
+    setAuthCookies(res, accessToken, refreshToken);
     return res.json({
       _id: user._id,
       username: user.username,
@@ -129,10 +217,17 @@ const authUser = async (req, res) => {
       roles: user.roles,
       isVerified: Boolean(user.isVerified),
       profilePicture: user.profilePicture || '',
-      token,
+      token: accessToken,
+      accessToken,
+      refreshToken,
     });
   } else {
     // Failed password attempt
+    recordUserSecurityLog(user._id, {
+      action: 'Failed sign-in attempt (incorrect password)',
+      req,
+      status: 'failed',
+    });
     user.loginAttempts = (user.loginAttempts || 0) + 1;
     if (user.loginAttempts >= 5) {
       user.lockUntil = new Date(Date.now() + 30 * 60 * 1000); // 30-min lock
@@ -278,6 +373,12 @@ const changePassword = async (req, res) => {
   user.password = await bcrypt.hash(newPassword, 10);
   await user.save();
   
+  recordUserSecurityLog(user._id, {
+    action: 'Changed account password',
+    req,
+    status: 'success',
+  });
+
   res.json({ message: 'Password changed successfully' });
   } catch (err) {
   console.error(err);
@@ -287,7 +388,8 @@ const changePassword = async (req, res) => {
   };
 
 const logoutUser = async (req, res) => {
-  res.clearCookie('token');
+  res.clearCookie('token', { path: '/' });
+  res.clearCookie('refreshToken', { path: '/' });
   res.json({ message: 'Logged out successfully' });
 };
 
@@ -378,6 +480,12 @@ const verifyEnable2FA = async (req, res) => {
     user.twoFactorTempSecret = null;
     await user.save();
 
+    recordUserSecurityLog(user._id, {
+      action: 'Enabled Two-Factor Authentication (TOTP)',
+      req,
+      status: 'success',
+    });
+
     await logAdminAction({
       req,
       actionType: '2FA_ENABLED',
@@ -430,6 +538,12 @@ const disable2FA = async (req, res) => {
     user.twoFactorTempSecret = null;
     user.twoFactorRecoveryCodes = [];
     await user.save();
+
+    recordUserSecurityLog(user._id, {
+      action: 'Disabled Two-Factor Authentication',
+      req,
+      status: 'warning',
+    });
 
     await logAdminAction({
       req,
@@ -501,13 +615,17 @@ const verify2FALogin = async (req, res) => {
     user.lockUntil = undefined;
     await user.save();
 
-    const token = generateToken(user._id);
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60 * 1000,
+    const sessionId = await createAndTrackSession(user, req);
+    const accessToken = generateAccessToken(user._id, sessionId);
+    const refreshToken = generateRefreshToken(user._id, sessionId);
+    recordUserSecurityLog(user._id, {
+      action: usedRecoveryCode
+        ? 'Signed in using 2FA emergency backup recovery code'
+        : 'Completed Two-Factor Authentication (TOTP)',
+      req,
+      status: 'success',
     });
+    setAuthCookies(res, accessToken, refreshToken);
 
     return res.json({
       _id: user._id,
@@ -516,13 +634,142 @@ const verify2FALogin = async (req, res) => {
       roles: user.roles,
       isVerified: Boolean(user.isVerified),
       profilePicture: user.profilePicture || '',
-      token,
+      token: accessToken,
+      accessToken,
+      refreshToken,
       usedRecoveryCode,
       remainingRecoveryCodes: user.twoFactorRecoveryCodes?.length || 0,
     });
   } catch (error) {
     console.error('Error during 2FA login verification:', error);
     res.status(500).json({ message: 'Server error during 2FA verification' });
+  }
+};
+
+const logoutOtherSessions = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const currentSessionId = req.sessionId;
+    if (currentSessionId) {
+      user.sessions = (user.sessions || []).filter((s) => s.sessionId === currentSessionId);
+    } else {
+      user.sessions = user.sessions && user.sessions.length ? [user.sessions[0]] : [];
+    }
+    await user.save();
+    res.json({ message: 'All other remote sessions have been logged out' });
+  } catch (err) {
+    res.status(500).json({ message: 'Error logging out other sessions' });
+  }
+};
+
+const getUserSessions = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('sessions');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const currentSessionId = req.sessionId;
+    const sessions = (user.sessions || []).map((s) => ({
+      sessionId: s.sessionId,
+      device: s.device,
+      browser: s.browser,
+      os: s.os,
+      ip: s.ip,
+      lastActive: s.lastActive,
+      createdAt: s.createdAt,
+      isCurrent: Boolean(currentSessionId && s.sessionId === currentSessionId),
+    }));
+    res.json({ sessions, currentSessionId });
+  } catch (err) {
+    res.status(500).json({ message: 'Error retrieving active sessions' });
+  }
+};
+
+const terminateSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    user.sessions = (user.sessions || []).filter((s) => s.sessionId !== sessionId);
+    await user.save();
+    recordUserSecurityLog(user._id, {
+      action: 'Revoked a remote device session',
+      req,
+      status: 'warning',
+    });
+    res.json({ message: 'Session terminated successfully' });
+  } catch (err) {
+    res.status(500).json({ message: 'Error terminating session' });
+  }
+};
+
+const getUserSecurityLogs = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('securityAuditLogs');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const logs = [...(user.securityAuditLogs || [])].reverse();
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to retrieve security audit logs' });
+  }
+};
+
+const rotateRefreshToken = async (req, res) => {
+  try {
+    let token = req.cookies?.refreshToken || req.body?.refreshToken;
+    let fallbackToken = req.cookies?.token;
+    if (!fallbackToken && req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      fallbackToken = req.headers.authorization.split(' ')[1];
+    }
+    const tokenToVerify = token || fallbackToken;
+    if (!tokenToVerify) {
+      return res.status(401).json({ message: 'No authorization token provided' });
+    }
+
+    let decoded;
+    const refreshSecret = process.env.JWT_REFRESH_SECRET || (process.env.JWT_SECRET + '_refresh_secret_key_v1');
+    try {
+      decoded = jwt.verify(tokenToVerify, refreshSecret);
+    } catch (e1) {
+      try {
+        decoded = jwt.verify(tokenToVerify, process.env.JWT_SECRET, { ignoreExpiration: true });
+      } catch (e2) {
+        return res.status(401).json({ message: 'Invalid or expired token' });
+      }
+    }
+
+    const user = await User.findById(decoded.id);
+    if (!user || user.isSuspended) {
+      return res.status(401).json({ message: 'User account invalid or suspended' });
+    }
+
+    if (decoded.sessionId && Array.isArray(user.sessions)) {
+      const sessionExists = user.sessions.some((s) => s.sessionId === decoded.sessionId);
+      if (!sessionExists) {
+        return res.status(401).json({ message: 'Session has been revoked' });
+      }
+    }
+
+    const newAccessToken = generateAccessToken(user._id, decoded.sessionId || '');
+    const newRefreshToken = generateRefreshToken(user._id, decoded.sessionId || '');
+
+    setAuthCookies(res, newAccessToken, newRefreshToken);
+
+    res.json({
+      token: newAccessToken,
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        roles: user.roles,
+        profilePicture: user.profilePicture || '',
+      },
+    });
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid or expired token' });
   }
 };
 
@@ -540,4 +787,9 @@ module.exports = {
   verifyEnable2FA,
   disable2FA,
   verify2FALogin,
+  getUserSessions,
+  terminateSession,
+  logoutOtherSessions,
+  getUserSecurityLogs,
+  rotateRefreshToken,
 };

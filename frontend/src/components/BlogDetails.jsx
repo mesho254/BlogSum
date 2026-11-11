@@ -12,6 +12,7 @@ import {
   Button,
   message,
   Spin,
+  Slider,
 } from 'antd';
 import {
   CommentOutlined,
@@ -38,6 +39,12 @@ import {
   CoffeeOutlined,
   HighlightOutlined,
   CloseOutlined,
+  UnorderedListOutlined,
+  CheckOutlined,
+  UndoOutlined,
+  RedoOutlined,
+  FolderAddOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useDispatch, useSelector } from 'react-redux';
@@ -56,6 +63,7 @@ import CommentsDrawer, {
   CommentsThreadContent,
   getTotalCommentsCount,
 } from './CommentsDrawer';
+import ReadingListModal from './ReadingListModal';
 
 const BlogDetail = () => {
   const { id } = useParams();
@@ -76,6 +84,24 @@ const BlogDetail = () => {
 
   const speechSynthesisRef = useRef(window.speechSynthesis);
   const utteranceRef = useRef(null);
+  const audioElementRef = useRef(null);
+  const speechKeepAliveRef = useRef(null);
+  const speechSentencesRef = useRef([]);
+  const speechCurrentIdxRef = useRef(0);
+  const isPlayingSpeechRef = useRef(false);
+
+  // Audio narration state
+  const [audioDockVisible, setAudioDockVisible] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [audioSpeed, setAudioSpeed] = useState(1);
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [audioSourceUrl, setAudioSourceUrl] = useState('');
+  const [useSpeechFallback, setUseSpeechFallback] = useState(false);
+
+  // Reading lists modal
+  const [readingListModalOpen, setReadingListModalOpen] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -155,6 +181,11 @@ const BlogDetail = () => {
       return [];
     }
   });
+
+  // Table of Contents & Code Block Enhancements
+  const [activeHeadingId, setActiveHeadingId] = useState('');
+  const [tocOpen, setTocOpen] = useState(true);
+  const contentContainerRef = useRef(null);
 
   // Real-time reader presence
   useEffect(() => {
@@ -256,12 +287,21 @@ const BlogDetail = () => {
     setScrollProgress(0);
     setActiveImageIdx(0);
     setSpeechState('stopped');
-    if (speechSynthesisRef.current) {
-      speechSynthesisRef.current.cancel();
+    setAudioPlaying(false);
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    if (speechKeepAliveRef.current) {
+      clearInterval(speechKeepAliveRef.current);
+      speechKeepAliveRef.current = null;
     }
     return () => {
-      if (speechSynthesisRef.current) {
-        speechSynthesisRef.current.cancel();
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      if (speechKeepAliveRef.current) {
+        clearInterval(speechKeepAliveRef.current);
+        speechKeepAliveRef.current = null;
       }
     };
   }, [id]);
@@ -282,6 +322,95 @@ const BlogDetail = () => {
     staleTime: 30 * 1000,
     refetchOnMount: 'always',
   });
+
+  const headings = useMemo(() => {
+    if (!blog?.content) return [];
+    try {
+      const doc = new DOMParser().parseFromString(blog.content, 'text/html');
+      const nodes = doc.querySelectorAll('h2, h3');
+      const items = [];
+      nodes.forEach((node, i) => {
+        const text = node.textContent?.trim();
+        if (text) {
+          items.push({
+            id: `section-${i}-${text.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+            text,
+            level: node.tagName.toLowerCase(),
+          });
+        }
+      });
+      return items;
+    } catch {
+      return [];
+    }
+  }, [blog?.content]);
+
+  useEffect(() => {
+    if (!contentContainerRef.current) return;
+    const container = contentContainerRef.current;
+
+    // Attach anchor IDs to headings
+    const headingElements = container.querySelectorAll('h2, h3');
+    headingElements.forEach((el, i) => {
+      if (headings[i]?.id) {
+        el.id = headings[i].id;
+        el.style.scrollMarginTop = '100px';
+      }
+    });
+
+    // Enhance code blocks with copy-to-clipboard button
+    const codeBlocks = container.querySelectorAll('pre, .ql-syntax');
+    codeBlocks.forEach((block) => {
+      if (block.dataset.enhanced) return;
+      block.dataset.enhanced = 'true';
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'ed-code-block-wrapper';
+
+      const bar = document.createElement('div');
+      bar.className = 'ed-code-block-bar';
+      bar.innerHTML = `
+        <span class="ed-code-lang">Code</span>
+        <button type="button" class="ed-code-copy-btn">
+          <svg viewBox="0 0 1024 1024" width="12" height="12" fill="currentColor"><path d="M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v704c0 17.7 14.3 32 32 32h512c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32z"/></svg>
+          <span>Copy</span>
+        </button>
+      `;
+
+      block.parentNode?.insertBefore(wrapper, block);
+      wrapper.appendChild(bar);
+      wrapper.appendChild(block);
+
+      const copyBtn = bar.querySelector('.ed-code-copy-btn');
+      copyBtn?.addEventListener('click', () => {
+        const textToCopy = block.innerText || block.textContent || '';
+        navigator.clipboard?.writeText(textToCopy).then(() => {
+          copyBtn.innerHTML = `<span>Copied!</span>`;
+          setTimeout(() => {
+            copyBtn.innerHTML = `
+              <svg viewBox="0 0 1024 1024" width="12" height="12" fill="currentColor"><path d="M832 64H296c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h496v688c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8V96c0-17.7-14.3-32-32-32zM704 192H192c-17.7 0-32 14.3-32 32v704c0 17.7 14.3 32 32 32h512c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32z"/></svg>
+              <span>Copy</span>
+            `;
+          }, 2000);
+        });
+      });
+    });
+
+    // Setup intersection observer for scroll-spy
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setActiveHeadingId(entry.target.id);
+          }
+        });
+      },
+      { rootMargin: '-80px 0px -65% 0px' }
+    );
+
+    headingElements.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [blog?.content, headings]);
 
   // Render PayPal buttons into modal
   useEffect(() => {
@@ -424,6 +553,27 @@ const BlogDetail = () => {
         String(user.username || '').trim().toLowerCase() === 'admin')
   );
   const canManage = Boolean(isAuthor || isAdmin);
+
+  const isMembersOnlyStory = Boolean(
+    blog?.isMembersOnly || blog?.accessLevel === 'members'
+  );
+  const hasMemberAccess = Boolean(
+    isAuthor ||
+      isAdmin ||
+      user?.membership?.tier === 'premium' ||
+      user?.membership?.tier === 'supporter'
+  );
+  const showPaywall = Boolean(isMembersOnlyStory && !hasMemberAccess);
+
+  const displayStoryContent = useMemo(() => {
+    if (!blog?.content) return '';
+    if (!showPaywall) return blog.content;
+    const parts = blog.content.split('</p>');
+    if (parts.length > 2) {
+      return parts.slice(0, 2).join('</p>') + '</p>';
+    }
+    return blog.content.slice(0, 450) + '...';
+  }, [blog?.content, showPaywall]);
 
   const handleToggleFeatured = async () => {
     if (!isAdmin || !blog) return;
@@ -679,30 +829,336 @@ const BlogDetail = () => {
     }
   };
 
-  const handleVoiceClick = () => {
+  const formatAudioTime = (seconds) => {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  const resolveAudioUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    const apiBase =
+      import.meta.env.VITE_API_URL ||
+      import.meta.env.REACT_APP_API_URL ||
+      'http://localhost:5000';
+    return `${apiBase.replace(/\/$/, '')}${url.startsWith('/') ? '' : '/'}${url}`;
+  };
+
+  const stopWebSpeech = () => {
+    isPlayingSpeechRef.current = false;
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    if (speechKeepAliveRef.current) {
+      clearInterval(speechKeepAliveRef.current);
+      speechKeepAliveRef.current = null;
+    }
+  };
+
+  const startWebSpeechNarration = (textToRead, resumeFromCurrent = false) => {
     if (!window.speechSynthesis) {
-      message.warning("Your browser doesn't support text-to-speech.");
+      message.error('Web Speech API is not supported in this browser.');
       return;
     }
 
-    if (speechState === 'playing') {
-      speechSynthesisRef.current.pause();
-      setSpeechState('paused');
-    } else if (speechState === 'paused') {
-      speechSynthesisRef.current.resume();
+    if (resumeFromCurrent && speechState === 'paused' && speechSentencesRef.current.length > 0) {
+      isPlayingSpeechRef.current = true;
+      speakNextChunk();
+      setAudioPlaying(true);
       setSpeechState('playing');
-    } else if (blog) {
-      const text = `${blog.title}. ${blog.content.replace(/<[^>]+>/g, ' ')}`;
-      const speech = new SpeechSynthesisUtterance(text);
-      speech.rate = 1;
-
-      utteranceRef.current = speech;
-      speechSynthesisRef.current.speak(speech);
-      setSpeechState('playing');
-
-      speech.onend = () => setSpeechState('stopped');
-      speech.onerror = () => setSpeechState('stopped');
+      return;
     }
+
+    stopWebSpeech();
+
+    const cleanProse = String(textToRead || '')
+      .replace(/<pre[\s\S]*?<\/pre>/gi, '')
+      .replace(/<code[\s\S]*?<\/code>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!cleanProse) {
+      message.warning('No text content available to narrate.');
+      return;
+    }
+
+    // Sentence chunking prevents Chrome 15s freeze bug
+    const sentences = cleanProse.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [cleanProse];
+    speechSentencesRef.current = sentences.map((s) => s.trim()).filter(Boolean);
+    if (!resumeFromCurrent) {
+      speechCurrentIdxRef.current = 0;
+    }
+
+    const voices = window.speechSynthesis.getVoices();
+    const naturalVoice =
+      voices.find(
+        (v) =>
+          v.lang.startsWith('en') &&
+          (v.name.includes('Natural') ||
+            v.name.includes('Neural') ||
+            v.name.includes('Online') ||
+            v.name.includes('Google') ||
+            v.name.includes('David') ||
+            v.name.includes('Zira'))
+      ) ||
+      voices.find((v) => v.lang.startsWith('en')) ||
+      voices[0];
+
+    function speakNextChunk() {
+      if (!isPlayingSpeechRef.current) return;
+      if (speechCurrentIdxRef.current >= speechSentencesRef.current.length) {
+        setAudioPlaying(false);
+        setSpeechState('stopped');
+        stopWebSpeech();
+        return;
+      }
+
+      const chunkText = speechSentencesRef.current[speechCurrentIdxRef.current];
+      const utterance = new SpeechSynthesisUtterance(chunkText);
+      if (naturalVoice) utterance.voice = naturalVoice;
+      utterance.rate = audioSpeed;
+      utterance.volume = 1;
+      utteranceRef.current = utterance;
+
+      utterance.onend = () => {
+        if (!isPlayingSpeechRef.current) return;
+        speechCurrentIdxRef.current++;
+        speakNextChunk();
+      };
+
+      utterance.onerror = (e) => {
+        if (!isPlayingSpeechRef.current) return;
+        console.warn('Speech chunk playback error:', e);
+        speechCurrentIdxRef.current++;
+        speakNextChunk();
+      };
+
+      window.speechSynthesis.speak(utterance);
+    }
+
+    // Chrome keep-alive: prevents silent freezing during long reading sessions
+    speechKeepAliveRef.current = setInterval(() => {
+      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      }
+    }, 9000);
+
+    isPlayingSpeechRef.current = true;
+    speakNextChunk();
+    setAudioPlaying(true);
+    setSpeechState('playing');
+  };
+
+  const handleGenerateNeuralAudio = async () => {
+    stopWebSpeech();
+    setAudioPlaying(false);
+    setSpeechState('stopped');
+    setUseSpeechFallback(false);
+
+    setIsGeneratingAudio(true);
+    message.loading({
+      content: 'Synthesizing neural AI audiobook narration...',
+      key: 'genAudio',
+      duration: 5,
+    });
+    try {
+      const res = await axiosInstance.post(`/api/blogs/${id}/generate-audio`);
+      if (res.data?.audioUrl) {
+        const fullAudioUrl = resolveAudioUrl(res.data.audioUrl);
+        setAudioSourceUrl(fullAudioUrl);
+        if (res.data.audioDuration) setAudioDuration(res.data.audioDuration);
+        setUseSpeechFallback(false);
+        message.success({ content: 'Neural audiobook ready!', key: 'genAudio' });
+        if (audioElementRef.current) {
+          audioElementRef.current.src = fullAudioUrl;
+          audioElementRef.current.playbackRate = audioSpeed;
+          audioElementRef.current
+            .play()
+            .then(() => {
+              setAudioPlaying(true);
+              setSpeechState('playing');
+            })
+            .catch(() => {
+              setAudioPlaying(false);
+              setSpeechState('paused');
+            });
+        }
+      } else {
+        message.error('Server could not generate neural audio.');
+      }
+    } catch (err) {
+      console.warn('Neural audio generation failed:', err);
+      message.error('Failed to generate neural audio narration.');
+    } finally {
+      setIsGeneratingAudio(false);
+    }
+  };
+
+  const handleToggleAudio = async () => {
+    if (audioPlaying) {
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+      }
+      stopWebSpeech();
+      setAudioPlaying(false);
+      setSpeechState('paused');
+      return;
+    }
+
+    setAudioDockVisible(true);
+
+    // If currently paused in Neural Audio mode, simply resume!
+    if (speechState === 'paused' && !useSpeechFallback && audioElementRef.current && (audioElementRef.current.src || audioSourceUrl || blog?.audioUrl)) {
+      if (!audioElementRef.current.src) {
+        audioElementRef.current.src = resolveAudioUrl(audioSourceUrl || blog?.audioUrl);
+      }
+      audioElementRef.current
+        .play()
+        .then(() => {
+          setAudioPlaying(true);
+          setSpeechState('playing');
+        })
+        .catch((err) => {
+          console.warn('Audio resume play error:', err);
+        });
+      return;
+    }
+
+    // If currently paused in Web Speech mode, resume smoothly from current index!
+    if (speechState === 'paused' && useSpeechFallback) {
+      if (blog) {
+        const fullText = `${blog.title}. ${blog.content}`;
+        startWebSpeechNarration(fullText, true);
+      }
+      return;
+    }
+
+    // 1. If blog already has a neural audio URL, prioritize and play it!
+    const targetUrl = resolveAudioUrl(audioSourceUrl || blog?.audioUrl);
+    if (targetUrl) {
+      setUseSpeechFallback(false);
+      if (!audioSourceUrl) setAudioSourceUrl(targetUrl);
+      if (blog?.audioDuration && !audioDuration) setAudioDuration(blog.audioDuration);
+      if (audioElementRef.current) {
+        audioElementRef.current.src = targetUrl;
+        audioElementRef.current.playbackRate = audioSpeed;
+        audioElementRef.current
+          .play()
+          .then(() => {
+            setAudioPlaying(true);
+            setSpeechState('playing');
+          })
+          .catch((err) => {
+            console.warn('Audio play blocked by browser policy:', err);
+            setAudioPlaying(false);
+            setSpeechState('paused');
+          });
+      }
+      return;
+    }
+
+    // 2. Otherwise request Neural Audio synthesis from backend
+    setIsGeneratingAudio(true);
+    setUseSpeechFallback(false);
+    message.loading({ content: 'Generating neural AI audiobook narration...', key: 'genAudio', duration: 5 });
+    try {
+      const res = await axiosInstance.post(`/api/blogs/${id}/generate-audio`);
+      if (res.data?.audioUrl) {
+        const fullAudioUrl = resolveAudioUrl(res.data.audioUrl);
+        setAudioSourceUrl(fullAudioUrl);
+        if (res.data.audioDuration) setAudioDuration(res.data.audioDuration);
+        setUseSpeechFallback(false);
+        message.success({ content: 'Neural audiobook ready!', key: 'genAudio' });
+        if (audioElementRef.current) {
+          audioElementRef.current.src = fullAudioUrl;
+          audioElementRef.current.playbackRate = audioSpeed;
+          audioElementRef.current
+            .play()
+            .then(() => {
+              setAudioPlaying(true);
+              setSpeechState('playing');
+            })
+            .catch((playErr) => {
+              console.warn('Autoplay prevented:', playErr);
+              message.info({ content: 'Click play to start audiobook', key: 'genAudio' });
+              setAudioPlaying(false);
+              setSpeechState('paused');
+            });
+        }
+      } else {
+        // Fallback to browser Web Speech API only if server returned no audio
+        setUseSpeechFallback(true);
+        message.info({ content: 'Playing with browser voice engine', key: 'genAudio' });
+        if (blog) {
+          const fullText = `${blog.title}. ${blog.content}`;
+          startWebSpeechNarration(fullText);
+        }
+      }
+    } catch (err) {
+      console.warn('Audio synthesis endpoint failed, falling back:', err);
+      setUseSpeechFallback(true);
+      message.info({ content: 'Playing with browser voice engine', key: 'genAudio' });
+      if (blog) {
+        const fullText = `${blog.title}. ${blog.content}`;
+        startWebSpeechNarration(fullText);
+      }
+    } finally {
+      setIsGeneratingAudio(false);
+    }
+  };
+
+  const handleSkipAudio = (offsetSeconds) => {
+    if (audioElementRef.current && !useSpeechFallback) {
+      const current = audioElementRef.current.currentTime || 0;
+      const target = Math.max(0, Math.min(audioDuration || 9999, current + offsetSeconds));
+      audioElementRef.current.currentTime = target;
+      setAudioCurrentTime(target);
+    } else if (useSpeechFallback && speechSentencesRef.current.length > 0) {
+      const skipCount = Math.round(offsetSeconds / 4);
+      speechCurrentIdxRef.current = Math.max(
+        0,
+        Math.min(speechSentencesRef.current.length - 1, speechCurrentIdxRef.current + skipCount)
+      );
+      if (audioPlaying && blog) {
+        startWebSpeechNarration(`${blog.title}. ${blog.content}`, true);
+      }
+    }
+  };
+
+  const handleSeekAudio = (value) => {
+    if (audioElementRef.current && !useSpeechFallback) {
+      audioElementRef.current.currentTime = value;
+      setAudioCurrentTime(value);
+    }
+  };
+
+  const handleChangeSpeed = (speed) => {
+    setAudioSpeed(speed);
+    if (audioElementRef.current) {
+      audioElementRef.current.playbackRate = speed;
+    }
+    if (useSpeechFallback && audioPlaying && blog) {
+      const fullText = `${blog.title}. ${blog.content}`;
+      startWebSpeechNarration(fullText, true);
+    }
+  };
+
+  const handleCloseAudioDock = () => {
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+    }
+    stopWebSpeech();
+    setAudioPlaying(false);
+    setSpeechState('stopped');
+    setAudioDockVisible(false);
   };
 
   if (isLoading) {
@@ -828,6 +1284,14 @@ const BlogDetail = () => {
           )}
 
           {/* Statement Editorial Title */}
+          {blog.isSponsored && (
+            <div className="ed-sponsored-badge">
+              <span className="ed-sponsored-pill">Sponsored Post</span>
+              <span className="ed-sponsored-text">
+                Published in partnership with <strong>{blog.sponsorName || 'our brand partner'}</strong>
+              </span>
+            </div>
+          )}
           <h1 className="ed-title">{blog.title}</h1>
 
           {blog.subtitle && (
@@ -922,10 +1386,13 @@ const BlogDetail = () => {
               >
                 <button
                   type="button"
-                  onClick={handleVoiceClick}
-                  className={`ed-util-btn ${speechState === 'playing' ? 'is-active' : ''}`}
+                  onClick={handleToggleAudio}
+                  disabled={isGeneratingAudio}
+                  className={`ed-util-btn ${audioPlaying ? 'is-active' : ''}`}
                 >
-                  {speechState === 'playing' ? (
+                  {isGeneratingAudio ? (
+                    <Spin size="small" />
+                  ) : audioPlaying ? (
                     <PauseOutlined />
                   ) : speechState === 'paused' ? (
                     <CaretRightOutlined />
@@ -933,7 +1400,9 @@ const BlogDetail = () => {
                     <AudioOutlined />
                   )}
                   <span className="ed-util-btn__label">
-                    {speechState === 'playing'
+                    {isGeneratingAudio
+                      ? 'Generating...'
+                      : audioPlaying
                       ? 'Listening'
                       : speechState === 'paused'
                       ? 'Paused'
@@ -949,6 +1418,23 @@ const BlogDetail = () => {
                   className={`ed-util-btn ${bookmarked ? 'is-active' : ''}`}
                 >
                   {bookmarked ? <BookFilled /> : <BookOutlined />}
+                </button>
+              </Tooltip>
+
+              <Tooltip title="Add to Reading List">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!user) {
+                      navigate('/login');
+                      return;
+                    }
+                    setReadingListModalOpen(true);
+                  }}
+                  className="ed-util-btn"
+                >
+                  <FolderAddOutlined />
+                  <span className="ed-util-btn__label">List</span>
                 </button>
               </Tooltip>
 
@@ -1081,6 +1567,12 @@ const BlogDetail = () => {
                 ))}
               </div>
             )}
+
+            {blog.imageCredit && (
+              <figcaption className="ed-image-credit">
+                {blog.imageCredit}
+              </figcaption>
+            )}
           </figure>
         )}
 
@@ -1115,6 +1607,21 @@ const BlogDetail = () => {
               >
                 {bookmarked ? <BookFilled /> : <BookOutlined />}
                 {bookmarkCount > 0 && <span>{bookmarkCount}</span>}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!user) {
+                    navigate('/login');
+                    return;
+                  }
+                  setReadingListModalOpen(true);
+                }}
+                className="ed-rail-btn"
+                title="Add to Reading List"
+              >
+                <FolderAddOutlined />
               </button>
 
               <Popover
@@ -1175,10 +1682,137 @@ const BlogDetail = () => {
               </div>
             )}
 
+            {/* Collapsible Table of Contents when article has 2+ headings */}
+            {headings.length >= 2 && (
+              <nav className="ed-toc-card" aria-label="Table of Contents">
+                <div className="ed-toc-card__header">
+                  <div className="ed-toc-card__title">
+                    <UnorderedListOutlined style={{ color: '#4f46e5' }} />
+                    <span>Table of Contents</span>
+                    <span className="ed-toc-card__badge">{headings.length} sections</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTocOpen((prev) => !prev)}
+                    className="ed-toc-toggle-btn"
+                  >
+                    {tocOpen ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                {tocOpen && (
+                  <ol className="ed-toc-list">
+                    {headings.map((h) => (
+                      <li
+                        key={h.id}
+                        className={`ed-toc-item ed-toc-item--${h.level} ${
+                          activeHeadingId === h.id ? 'is-active' : ''
+                        }`}
+                      >
+                        <a
+                          href={`#${h.id}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            document.getElementById(h.id)?.scrollIntoView({
+                              behavior: 'smooth',
+                              block: 'start',
+                            });
+                            setActiveHeadingId(h.id);
+                          }}
+                        >
+                          {h.text}
+                        </a>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </nav>
+            )}
+
+            {/* Sponsored Content FTC Disclosure Badge */}
+            {blog.isSponsored && (
+              <div className="ed-sponsored-badge">
+                <span className="ed-sponsored-badge__dot" />
+                <span>
+                  Sponsored Content · Presented in partnership with{' '}
+                  <strong>{blog.sponsorName || 'our featured sponsor'}</strong>
+                </span>
+              </div>
+            )}
+
             <div
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(blog.content) }}
-              className="ed-prose-content"
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(displayStoryContent) }}
+              className={`ed-prose-content ${showPaywall ? 'is-paywalled' : ''}`}
+              ref={contentContainerRef}
             />
+
+            {/* Metered / Members-Only Subscription Paywall Card */}
+            {showPaywall && (
+              <div className="ed-paywall-card">
+                <div className="ed-paywall-badge">
+                  <StarFilled style={{ color: '#fbbf24', fontSize: 13 }} />
+                  <span>Members-Only Story</span>
+                </div>
+                <h3 className="ed-paywall-title">
+                  This story is exclusive to BlogSum Members
+                </h3>
+                <p className="ed-paywall-desc">
+                  The author has published this deep dive exclusively for supporters. Join BlogSum Members for unlimited access to member-only publications, offline reading, and creator audiobooks.
+                </p>
+                <div className="ed-paywall-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!user) {
+                        navigate('/login');
+                      } else {
+                        navigate('/settings?tab=monetization');
+                      }
+                    }}
+                    className="ed-paywall-btn"
+                  >
+                    {user ? 'Unlock Story & Upgrade Membership' : 'Sign in to Read Full Story'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Attached Digital Asset / Resource Card */}
+            {!showPaywall && blog.digitalProduct?.enabled && (
+              <div className="ed-digital-asset-card">
+                <div className="ed-digital-asset-card__icon">
+                  <DownloadOutlined />
+                </div>
+                <div className="ed-digital-asset-card__info">
+                  <span className="ed-digital-asset-card__tag">Attached Resource</span>
+                  <h4 className="ed-digital-asset-card__title">
+                    {blog.digitalProduct.name || 'Story Companion Resources'}
+                  </h4>
+                  <span className="ed-digital-asset-card__price">
+                    {blog.digitalProduct.price > 0 ? `$${blog.digitalProduct.price}` : 'Free with Story'}
+                  </span>
+                </div>
+                {blog.digitalProduct.downloadUrl ? (
+                  <a
+                    href={blog.digitalProduct.downloadUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ed-digital-asset-card__btn"
+                  >
+                    <DownloadOutlined />
+                    <span>Download</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setTipModalVisible(true)}
+                    className="ed-digital-asset-card__btn"
+                  >
+                    <CoffeeOutlined />
+                    <span>Tip to Access</span>
+                  </button>
+                )}
+              </div>
+            )}
 
             {Array.isArray(blog.tags) && blog.tags.length > 0 && (
               <div className="ed-article-tags">
@@ -1231,6 +1865,20 @@ const BlogDetail = () => {
                 >
                   {bookmarked ? <BookFilled /> : <BookOutlined />}
                   <span>{bookmarked ? 'Saved' : 'Save'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!user) {
+                      navigate('/login');
+                      return;
+                    }
+                    setReadingListModalOpen(true);
+                  }}
+                  className="ed-footer-text-btn"
+                >
+                  <FolderAddOutlined />
+                  <span>Add to List</span>
                 </button>
                 <button
                   type="button"
@@ -1396,29 +2044,130 @@ const BlogDetail = () => {
         comments={blog.comments || []}
       />
 
-      {/* Floating Sticky Audio Narration Dock */}
-      {speechState !== 'stopped' && (
+      {/* Floating Sticky AI Audiobook Narration Dock */}
+      {audioDockVisible && (
         <div className="ed-audio-dock">
+          {/* Audio stream element (always mounted so ref is never null) */}
+          <audio
+            ref={audioElementRef}
+            src={resolveAudioUrl(audioSourceUrl || blog?.audioUrl)}
+            preload="metadata"
+            onTimeUpdate={() => {
+              if (audioElementRef.current) {
+                setAudioCurrentTime(audioElementRef.current.currentTime || 0);
+              }
+            }}
+            onLoadedMetadata={() => {
+              if (audioElementRef.current?.duration) {
+                setAudioDuration(audioElementRef.current.duration);
+              }
+            }}
+            onEnded={() => {
+              setAudioPlaying(false);
+              setSpeechState('stopped');
+            }}
+            onError={(e) => {
+              console.warn('Audio tag playback error:', e);
+            }}
+            style={{ display: 'none' }}
+          />
+
           <div className="ed-audio-dock__info">
             <div className="ed-audio-dock__icon">
               <AudioOutlined />
             </div>
             <div className="ed-audio-dock__meta">
               <span className="ed-audio-dock__title">{blog.title}</span>
-              <span className="ed-audio-dock__sub">
-                Narrated by Web Speech Engine · {speechState === 'playing' ? 'Playing' : 'Paused'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="ed-audio-dock__sub">
+                  {isGeneratingAudio
+                    ? 'Synthesizing neural audio...'
+                    : useSpeechFallback
+                    ? `Web Speech Voice · ${audioPlaying ? 'Playing' : 'Paused'}`
+                    : `Neural Audiobook Player · ${audioPlaying ? 'Playing' : 'Paused'}`}
+                </span>
+                {useSpeechFallback && (
+                  <button
+                    type="button"
+                    onClick={handleGenerateNeuralAudio}
+                    disabled={isGeneratingAudio}
+                    className="ed-audio-switch-neural-btn"
+                    title="Switch to Neural Audiobook Player"
+                  >
+                    ⚡ Switch to Neural Audio
+                  </button>
+                )}
+              </div>
             </div>
+          </div>
+
+          <div className="ed-audio-dock__center">
+            <div className="ed-audio-dock__playback-row">
+              <button
+                type="button"
+                onClick={() => handleSkipAudio(-15)}
+                className="ed-audio-skip-btn"
+                title="Rewind 15 seconds"
+              >
+                <UndoOutlined />
+                <span className="ed-audio-skip-text">15s</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleToggleAudio}
+                className="ed-audio-dock__play-btn"
+                title={audioPlaying ? 'Pause' : 'Play'}
+                disabled={isGeneratingAudio}
+              >
+                {isGeneratingAudio ? (
+                  <Spin size="small" />
+                ) : audioPlaying ? (
+                  <PauseOutlined />
+                ) : (
+                  <CaretRightOutlined />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSkipAudio(15)}
+                className="ed-audio-skip-btn"
+                title="Skip ahead 15 seconds"
+              >
+                <RedoOutlined />
+                <span className="ed-audio-skip-text">15s</span>
+              </button>
+            </div>
+
+            {!useSpeechFallback && (
+              <div className="ed-audio-dock__scrubber-row">
+                <span className="ed-audio-time">{formatAudioTime(audioCurrentTime)}</span>
+                <div className="ed-audio-slider-wrap">
+                  <Slider
+                    min={0}
+                    max={audioDuration || 100}
+                    step={1}
+                    value={audioCurrentTime}
+                    onChange={handleSeekAudio}
+                    tooltip={{ formatter: (val) => formatAudioTime(val) }}
+                  />
+                </div>
+                <span className="ed-audio-time">
+                  {formatAudioTime(audioDuration || blog.audioDuration || 0)}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="ed-audio-dock__controls">
             <div className="ed-audio-dock__speeds">
-              {[0.75, 1, 1.25, 1.5, 2].map((rate) => (
+              {[1, 1.25, 1.5, 2].map((rate) => (
                 <button
                   key={rate}
                   type="button"
-                  onClick={() => changePlaybackRate(rate)}
-                  className={`ed-audio-speed-btn ${playbackRate === rate ? 'is-active' : ''}`}
+                  onClick={() => handleChangeSpeed(rate)}
+                  className={`ed-audio-speed-btn ${audioSpeed === rate ? 'is-active' : ''}`}
                 >
                   {rate}x
                 </button>
@@ -1427,18 +2176,7 @@ const BlogDetail = () => {
 
             <button
               type="button"
-              onClick={handleVoiceClick}
-              className="ed-audio-dock__play-btn"
-            >
-              {speechState === 'playing' ? <PauseOutlined /> : <CaretRightOutlined />}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                speechSynthesisRef.current?.cancel();
-                setSpeechState('stopped');
-              }}
+              onClick={handleCloseAudioDock}
               className="ed-audio-dock__close-btn"
               title="Close player"
             >
@@ -1447,6 +2185,15 @@ const BlogDetail = () => {
           </div>
         </div>
       )}
+
+      {/* Reader Bookmarks & Reading List Modal */}
+      <ReadingListModal
+        open={readingListModalOpen}
+        onClose={() => setReadingListModalOpen(false)}
+        blogId={blog._id}
+        blogTitle={blog.title}
+        user={user}
+      />
 
       {/* Author Tipping Jar Modal */}
       <Modal
@@ -1693,10 +2440,11 @@ const BlogDetail = () => {
           position: fixed;
           top: 0;
           left: 0;
-          height: 2px;
-          background: #111827;
-          z-index: 2000;
+          height: 3px;
+          background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 50%, #ec4899 100%);
+          z-index: 9999;
           transition: width 0.1s linear;
+          box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
         }
         .ed-article-wrapper {
           padding-top: 112px;
@@ -2100,6 +2848,135 @@ const BlogDetail = () => {
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.04em;
+        }
+        .ed-image-credit {
+          text-align: center;
+          font-size: 12.5px;
+          color: #64748b;
+          font-style: italic;
+          margin-top: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+        }
+
+        /* TABLE OF CONTENTS */
+        .ed-toc-card {
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          padding: 16px 20px;
+          margin-bottom: 32px;
+        }
+        .ed-toc-card__header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding-bottom: 10px;
+          border-bottom: 1px solid #e2e8f0;
+        }
+        .ed-toc-card__title {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 14px;
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .ed-toc-card__badge {
+          font-size: 11px;
+          font-weight: 600;
+          color: #64748b;
+          background: #e2e8f0;
+          padding: 2px 8px;
+          border-radius: 999px;
+        }
+        .ed-toc-toggle-btn {
+          border: none;
+          background: transparent;
+          color: #4f46e5;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .ed-toc-list {
+          margin: 12px 0 0;
+          padding-left: 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .ed-toc-item {
+          font-size: 13.5px;
+          line-height: 1.4;
+        }
+        .ed-toc-item--h3 {
+          padding-left: 14px;
+          font-size: 12.5px;
+        }
+        .ed-toc-item a {
+          color: #475569;
+          text-decoration: none;
+          transition: color 0.15s ease;
+        }
+        .ed-toc-item a:hover {
+          color: #4f46e5;
+          text-decoration: underline;
+        }
+        .ed-toc-item.is-active a {
+          color: #4f46e5;
+          font-weight: 700;
+        }
+
+        /* CODE BLOCK ENHANCEMENT */
+        .ed-code-block-wrapper {
+          border-radius: 10px;
+          overflow: hidden;
+          background: #0f172a;
+          margin: 24px 0;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+        .ed-code-block-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 16px;
+          background: #1e293b;
+          border-bottom: 1px solid #334155;
+          font-size: 11.5px;
+          color: #94a3b8;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+        .ed-code-copy-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 3px 8px;
+          border-radius: 5px;
+          border: 1px solid #475569;
+          background: #334155;
+          color: #e2e8f0;
+          font-size: 11px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .ed-code-copy-btn:hover {
+          background: #475569;
+          color: #ffffff;
+        }
+        .ed-prose-content pre,
+        .ed-prose-content .ql-syntax {
+          background: #0f172a;
+          color: #e2e8f0;
+          padding: 16px 20px;
+          margin: 0;
+          border-radius: 0 0 10px 10px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+          font-size: 13.5px;
+          line-height: 1.6;
+          overflow-x: auto;
+          white-space: pre;
         }
         .ed-reading-grid {
           max-width: 960px;
@@ -2564,6 +3441,70 @@ const BlogDetail = () => {
           flex-direction: column;
           min-width: 0;
         }
+        .ed-audio-dock__center {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 6px;
+          flex: 1.4;
+          min-width: 0;
+        }
+        .ed-audio-dock__playback-row {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .ed-audio-skip-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          border: none;
+          background: rgba(255, 255, 255, 0.08);
+          color: #cbd5e1;
+          font-size: 13px;
+          padding: 4px 8px;
+          border-radius: 999px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .ed-audio-skip-btn:hover {
+          background: rgba(255, 255, 255, 0.18);
+          color: #ffffff;
+        }
+        .ed-audio-skip-text {
+          font-size: 10px;
+          font-weight: 700;
+        }
+        .ed-audio-dock__scrubber-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          min-width: 0;
+        }
+        .ed-audio-time {
+          font-size: 10.5px;
+          font-weight: 600;
+          color: #94a3b8;
+          font-variant-numeric: tabular-nums;
+          flex-shrink: 0;
+        }
+        .ed-audio-slider-wrap {
+          flex: 1;
+          min-width: 0;
+        }
+        .ed-audio-slider-wrap .ant-slider {
+          margin: 4px 0;
+        }
+        .ed-audio-slider-wrap .ant-slider-rail {
+          background-color: rgba(255, 255, 255, 0.2) !important;
+        }
+        .ed-audio-slider-wrap .ant-slider-track {
+          background-color: #38bdf8 !important;
+        }
+        .ed-audio-slider-wrap .ant-slider-handle::after {
+          box-shadow: 0 0 0 2px #38bdf8 !important;
+        }
         .ed-audio-dock__title {
           font-size: 13px;
           font-weight: 600;
@@ -2575,6 +3516,25 @@ const BlogDetail = () => {
         .ed-audio-dock__sub {
           font-size: 11px;
           color: #94a3b8;
+        }
+        .ed-audio-switch-neural-btn {
+          background: rgba(99, 102, 241, 0.25);
+          border: 1px solid rgba(129, 140, 248, 0.45);
+          color: #c7d2fe;
+          font-size: 10px;
+          font-weight: 700;
+          padding: 2px 8px;
+          border-radius: 999px;
+          cursor: pointer;
+          transition: all 0.18s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+        }
+        .ed-audio-switch-neural-btn:hover {
+          background: #6366f1;
+          color: #ffffff;
+          border-color: #6366f1;
         }
         .ed-audio-dock__controls {
           display: flex;

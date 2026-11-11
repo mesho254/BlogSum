@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const path = require('path');
 const { protect, admin } = require('../MiddleWares/authMiddleWare');
+const { validateFileMagicBytes } = require('../Utils/fileValidator');
 const {
   getAdminOverview,
   getAllAdminBlogs,
@@ -47,6 +50,18 @@ const handleResumeUpload = (req, res, next) => {
   uploadResume.single('resume')(req, res, (err) => {
     if (err) {
       return res.status(400).json({ error: err.message || 'File upload error' });
+    }
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      const isValid = validateFileMagicBytes(req.file.path, ext);
+      if (!isValid) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {}
+        return res.status(400).json({
+          error: 'Security verification failed: File binary header does not match claimed document extension.',
+        });
+      }
     }
     next();
   });
@@ -103,6 +118,11 @@ router.delete('/channels/:id', protect, admin, deleteChannelAdmin);
 // Global Platform Settings
 router.get('/settings', protect, admin, getSiteSettingsAdmin);
 router.put('/settings', protect, admin, updateSiteSettingsAdmin);
+router.post('/send-weekly-digest', protect, admin, async (req, res) => {
+  const { dispatchWeeklyDigest } = require('../Utils/weeklyDigestEngine');
+  const result = await dispatchWeeklyDigest();
+  res.json(result);
+});
 
 // Security & Audit Governance
 router.get('/audit-logs', protect, admin, getAuditLogsAdmin);

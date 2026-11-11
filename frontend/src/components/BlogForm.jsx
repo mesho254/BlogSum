@@ -9,6 +9,7 @@ import {
   DatePicker,
   Tooltip,
   Spin,
+  Dropdown,
 } from 'antd';
 import {
   PlusOutlined,
@@ -27,6 +28,13 @@ import {
   RightOutlined,
   ArrowLeftOutlined,
   PictureOutlined,
+  ThunderboltOutlined,
+  HistoryOutlined,
+  CameraOutlined,
+  FileMarkdownOutlined,
+  CloudUploadOutlined,
+  CheckOutlined,
+  CloudOutlined,
 } from '@ant-design/icons';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
@@ -37,6 +45,10 @@ import useAuth from '../hooks/useAuth';
 import Navbar from './NavBar';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import UnsplashModal from './UnsplashModal';
+import RevisionDrawer from './RevisionDrawer';
+import AiCopilotDrawer from './AiCopilotDrawer';
+import { exportStoryToMarkdown, parseMarkdownToStory } from '../utils/markdownHelper';
 
 const { Option } = Select;
 
@@ -91,6 +103,13 @@ const BlogForm = () => {
   const [autoReadTime, setAutoReadTime] = useState(true);
   const [category, setCategory] = useState('Technology');
   const [allowComments, setAllowComments] = useState(true);
+  const [accessLevel, setAccessLevel] = useState('public'); // 'public' | 'members' | 'metered'
+  const [isSponsored, setIsSponsored] = useState(false);
+  const [sponsorName, setSponsorName] = useState('');
+  const [digitalProductEnabled, setDigitalProductEnabled] = useState(false);
+  const [digitalProductName, setDigitalProductName] = useState('');
+  const [digitalProductUrl, setDigitalProductUrl] = useState('');
+  const [digitalProductPrice, setDigitalProductPrice] = useState(0);
 
   // Up to 5 images: each item is { id, url, file: File | null, isExisting: boolean }
   const [mediaItems, setMediaItems] = useState([]);
@@ -112,6 +131,22 @@ const BlogForm = () => {
   const [fetchingBlog, setFetchingBlog] = useState(Boolean(id));
   const [submitting, setSubmitting] = useState(false);
   const [publishStage, setPublishStage] = useState('');
+
+  // Auto-Save, Revision History, and Copilot States
+  const [activeDraftId, setActiveDraftId] = useState(id || null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState(''); // 'saving' | 'saved' | 'saved-local'
+  const [lastSavedTime, setLastSavedTime] = useState(null);
+  const [draftRecoveryAvailable, setDraftRecoveryAvailable] = useState(null);
+
+  const [isRevisionDrawerOpen, setIsRevisionDrawerOpen] = useState(false);
+  const [revisions, setRevisions] = useState([]);
+  const [loadingRevisions, setLoadingRevisions] = useState(false);
+  const [restoringRevision, setRestoringRevision] = useState(false);
+
+  const [isAiCopilotOpen, setIsAiCopilotOpen] = useState(false);
+  const [isUnsplashModalOpen, setIsUnsplashModalOpen] = useState(false);
+  const [imageCredit, setImageCredit] = useState('');
+  const markdownFileInputRef = useRef(null);
 
   const previewBodyRef = useRef(null);
 
@@ -144,7 +179,17 @@ const BlogForm = () => {
         setAutoReadTime(false);
         setCategory(fetched.category || 'Technology');
         setAllowComments(fetched.allowComments !== false);
+        setAccessLevel(fetched.accessLevel || (fetched.isMembersOnly ? 'members' : 'public'));
+        setIsSponsored(Boolean(fetched.isSponsored));
+        setSponsorName(fetched.sponsorName || '');
+        if (fetched.digitalProduct) {
+          setDigitalProductEnabled(Boolean(fetched.digitalProduct.enabled));
+          setDigitalProductName(fetched.digitalProduct.name || '');
+          setDigitalProductUrl(fetched.digitalProduct.downloadUrl || '');
+          setDigitalProductPrice(fetched.digitalProduct.price || 0);
+        }
         setTags(Array.isArray(fetched.tags) ? fetched.tags : []);
+        setImageCredit(fetched.imageCredit || '');
 
         // Load existing featured image & gallery images (up to 5)
         const rawUrls =
@@ -197,6 +242,221 @@ const BlogForm = () => {
       setActiveSlideIndex(0);
     }
   }, [mediaItems.length, activeSlideIndex]);
+
+  // 1. Check for unsaved local draft recovery on initial load
+  const autoSaveStorageKey = `blogsum_autosave_${id || 'new'}`;
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(autoSaveStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.content && parsed.content.length > 20 && parsed.timestamp) {
+          const ageHours = (Date.now() - parsed.timestamp) / (1000 * 60 * 60);
+          if (ageHours < 48) {
+            setDraftRecoveryAvailable(parsed);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not read autosaved snapshot:', e);
+    }
+  }, [id, autoSaveStorageKey]);
+
+  const handleRestoreLocalDraft = () => {
+    if (!draftRecoveryAvailable) return;
+    if (draftRecoveryAvailable.title) setTitle(draftRecoveryAvailable.title);
+    if (draftRecoveryAvailable.subtitle) setSubtitle(draftRecoveryAvailable.subtitle);
+    if (draftRecoveryAvailable.content) setContent(draftRecoveryAvailable.content);
+    if (draftRecoveryAvailable.category) setCategory(draftRecoveryAvailable.category);
+    if (Array.isArray(draftRecoveryAvailable.tags)) setTags(draftRecoveryAvailable.tags);
+    if (draftRecoveryAvailable.imageCredit) setImageCredit(draftRecoveryAvailable.imageCredit);
+    message.success('Restored unsaved draft changes!');
+    setDraftRecoveryAvailable(null);
+  };
+
+  const handleDismissLocalDraft = () => {
+    localStorage.removeItem(autoSaveStorageKey);
+    setDraftRecoveryAvailable(null);
+  };
+
+  // 2. Debounced background auto-save to localStorage & server
+  const lastSavedSnapshotRef = useRef('');
+  useEffect(() => {
+    if (!title && !content) return;
+    const currentHash = `${title}__${subtitle}__${content.length}__${category}`;
+    if (currentHash === lastSavedSnapshotRef.current) return;
+
+    setAutoSaveStatus('saving');
+    const timer = setTimeout(async () => {
+      try {
+        const snapshot = {
+          title,
+          subtitle,
+          content,
+          category,
+          tags,
+          readTime,
+          imageCredit,
+          timestamp: Date.now(),
+        };
+        localStorage.setItem(autoSaveStorageKey, JSON.stringify(snapshot));
+
+        if (user?.token) {
+          const res = await axiosInstance.put(
+            '/api/blogs/draft-autosave',
+            {
+              blogId: id || activeDraftId,
+              title,
+              subtitle,
+              content,
+              category,
+              tags,
+              readTime,
+              imageCredit,
+            },
+            {
+              headers: { Authorization: `Bearer ${user.token}` },
+            }
+          );
+          if (res.data?.draftId && !id && !activeDraftId) {
+            setActiveDraftId(res.data.draftId);
+          }
+        }
+
+        setAutoSaveStatus('saved');
+        setLastSavedTime(new Date());
+        lastSavedSnapshotRef.current = currentHash;
+      } catch (err) {
+        console.warn('Auto-save saved locally:', err);
+        setAutoSaveStatus('saved-local');
+        setLastSavedTime(new Date());
+      }
+    }, 4500);
+
+    return () => clearTimeout(timer);
+  }, [title, subtitle, content, category, tags, readTime, imageCredit, id, activeDraftId, user, autoSaveStorageKey]);
+
+  // 3. Version History Handlers
+  const handleOpenRevisions = async () => {
+    setIsRevisionDrawerOpen(true);
+    const targetId = id || activeDraftId;
+    if (!targetId) return;
+
+    setLoadingRevisions(true);
+    try {
+      const res = await axiosInstance.get(`/api/blogs/${targetId}/revisions`, {
+        headers: { Authorization: `Bearer ${user?.token}` },
+      });
+      setRevisions(res.data || []);
+    } catch (err) {
+      console.error('Error fetching revisions:', err);
+    } finally {
+      setLoadingRevisions(false);
+    }
+  };
+
+  const handleRestoreRevision = async (revId) => {
+    const targetId = id || activeDraftId;
+    if (!targetId) return;
+
+    setRestoringRevision(true);
+    try {
+      const res = await axiosInstance.post(
+        `/api/blogs/${targetId}/revisions/${revId}/restore`,
+        null,
+        { headers: { Authorization: `Bearer ${user?.token}` } }
+      );
+      const restored = res.data?.blog;
+      if (restored) {
+        setTitle(restored.title || '');
+        setSubtitle(restored.subtitle || '');
+        setContent(restored.content || '');
+        if (restored.category) setCategory(restored.category);
+        if (Array.isArray(restored.tags)) setTags(restored.tags);
+        message.success(res.data?.message || 'Revision restored successfully!');
+        setIsRevisionDrawerOpen(false);
+      }
+    } catch (err) {
+      console.error('Error restoring revision:', err);
+      message.error('Failed to restore revision');
+    } finally {
+      setRestoringRevision(false);
+    }
+  };
+
+  // 4. Markdown Import / Export Handlers
+  const handleExportMarkdown = () => {
+    exportStoryToMarkdown({
+      title: title || 'Untitled Story',
+      subtitle,
+      content,
+      category,
+      tags,
+      imageUrl: mediaItems[0]?.url || '',
+    });
+    message.success('Story exported as Markdown (.md)!');
+  };
+
+  const handleImportMarkdownFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const mdText = event.target?.result;
+      if (typeof mdText === 'string') {
+        const parsed = parseMarkdownToStory(mdText);
+        if (parsed.title) setTitle(parsed.title);
+        if (parsed.subtitle) setSubtitle(parsed.subtitle);
+        if (parsed.category) setCategory(parsed.category);
+        if (Array.isArray(parsed.tags) && parsed.tags.length > 0) setTags(parsed.tags);
+        if (parsed.content) setContent(parsed.content);
+        message.success('Markdown imported into story editor!');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  // 5. Unsplash Stock Photo Picker Handler
+  const handleSelectUnsplashPhoto = ({ url, credit }) => {
+    setImageCredit(credit);
+    const newMedia = {
+      id: `unsplash-${Date.now()}`,
+      url,
+      file: null,
+      isExisting: true,
+      credit,
+    };
+    setMediaItems((prev) => [newMedia, ...prev.slice(0, 4)]);
+    message.success('Unsplash photo added as cover image!');
+  };
+
+  // 6. AI Copilot Callbacks
+  const handleApplyAiTitle = (aiTitle) => {
+    setTitle(aiTitle);
+  };
+  const handleApplyAiSubtitle = (aiSubtitle) => {
+    setSubtitle(aiSubtitle);
+  };
+  const handleAddAiTag = (newTag) => {
+    if (!tags.includes(newTag) && tags.length < 8) {
+      setTags((prev) => [...prev, newTag]);
+    }
+  };
+  const handleInsertTakeaways = (takeaways) => {
+    if (!Array.isArray(takeaways) || takeaways.length === 0) return;
+    const bulletsHtml = `
+      <div style="background:#f0fdf4; border-left:4px solid #16a34a; padding:16px 20px; border-radius:12px; margin:20px 0;">
+        <h4 style="margin:0 0 8px; color:#15803d; font-weight:800; font-size:15px;">Key Takeaways</h4>
+        <ul style="margin:0; padding-left:20px; color:#166534; font-size:14px; line-height:1.6;">
+          ${takeaways.map((t) => `<li>${t}</li>`).join('')}
+        </ul>
+      </div>
+    `;
+    setContent((prev) => bulletsHtml + prev);
+  };
 
   const handleAddImageFile = (file) => {
     if (!file.type?.startsWith('image/')) {
@@ -301,8 +561,21 @@ const BlogForm = () => {
     formData.append('readTime', readTime || '3');
     formData.append('category', category);
     formData.append('allowComments', String(allowComments));
+    formData.append('accessLevel', accessLevel);
+    formData.append('isMembersOnly', String(accessLevel === 'members'));
+    formData.append('isSponsored', String(isSponsored));
+    if (isSponsored) formData.append('sponsorName', sponsorName);
+    formData.append('digitalProductEnabled', String(digitalProductEnabled));
+    if (digitalProductEnabled) {
+      formData.append('digitalProductName', digitalProductName);
+      formData.append('digitalProductUrl', digitalProductUrl);
+      formData.append('digitalProductPrice', String(digitalProductPrice));
+    }
     formData.append('author', user._id);
     formData.append('tags', JSON.stringify(tags));
+    if (imageCredit) {
+      formData.append('imageCredit', imageCredit);
+    }
 
     // Separate existing image URLs vs newly uploaded files while preserving featured order
     const existingUrls = mediaItems.filter((m) => m.isExisting).map((m) => m.url);
@@ -400,7 +673,7 @@ const BlogForm = () => {
     () => ({
       toolbar: [
         [{ header: [1, 2, 3, false] }],
-        ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+        ['bold', 'italic', 'underline', 'strike', 'blockquote', 'code-block'],
         [{ list: 'ordered' }, { list: 'bullet' }],
         ['link', 'image', 'video'],
         ['clean'],
@@ -490,6 +763,29 @@ const BlogForm = () => {
             <span className="studio-status-label">
               {id ? 'Editing Story' : 'New Story'} · {wordCount} words · {readTime || 1} min read
             </span>
+
+            {/* Auto-Save Status Pill */}
+            {autoSaveStatus && (
+              <div className="studio-autosave-indicator">
+                {autoSaveStatus === 'saving' ? (
+                  <span className="studio-autosave-pill is-saving">
+                    <CloudUploadOutlined style={{ marginRight: 4 }} spin /> Saving...
+                  </span>
+                ) : (
+                  <Tooltip
+                    title={
+                      lastSavedTime
+                        ? `Auto-saved at ${moment(lastSavedTime).format('h:mm:ss A')}`
+                        : 'Changes auto-saved'
+                    }
+                  >
+                    <span className="studio-autosave-pill is-saved">
+                      <CheckOutlined style={{ marginRight: 4, color: '#16a34a' }} /> Saved
+                    </span>
+                  </Tooltip>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Center View Switcher: Editor | Split | Interactive Preview */}
@@ -517,8 +813,67 @@ const BlogForm = () => {
             </button>
           </div>
 
-          {/* Right Publish Actions */}
+          {/* Right Publish Actions & Tools */}
           <div className="studio-topbar__right">
+            {/* AI Editorial Copilot Tool */}
+            <Tooltip title="AI Editorial Assistant (Headlines, TL;DR, Readability)">
+              <button
+                type="button"
+                onClick={() => setIsAiCopilotOpen(true)}
+                className="studio-tool-btn is-ai"
+              >
+                <ThunderboltOutlined style={{ color: '#d97706' }} />
+                <span>AI Copilot</span>
+              </button>
+            </Tooltip>
+
+            {/* Version History Drawer Trigger */}
+            <Tooltip title="Version History & Revisions">
+              <button
+                type="button"
+                onClick={handleOpenRevisions}
+                className="studio-tool-btn"
+              >
+                <HistoryOutlined />
+                <span>History</span>
+              </button>
+            </Tooltip>
+
+            {/* Markdown Export / Import Menu */}
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'export-md',
+                    label: 'Export Story as Markdown (.md)',
+                    icon: <FileMarkdownOutlined style={{ color: '#4f46e5' }} />,
+                    onClick: handleExportMarkdown,
+                  },
+                  {
+                    key: 'import-md',
+                    label: 'Import Markdown (.md) File',
+                    icon: <CloudUploadOutlined style={{ color: '#059669' }} />,
+                    onClick: () => markdownFileInputRef.current?.click(),
+                  },
+                ],
+              }}
+              trigger={['click']}
+              placement="bottomRight"
+            >
+              <button type="button" className="studio-tool-btn">
+                <FileMarkdownOutlined />
+                <span>Markdown</span>
+              </button>
+            </Dropdown>
+
+            <input
+              type="file"
+              ref={markdownFileInputRef}
+              accept=".md,.markdown"
+              onChange={handleImportMarkdownFile}
+              style={{ display: 'none' }}
+            />
+
             {publishMode !== 'draft' && (
               <button
                 type="button"
@@ -541,6 +896,34 @@ const BlogForm = () => {
           </div>
         </div>
       </div>
+
+      {/* Local Draft Recovery Banner */}
+      {draftRecoveryAvailable && (
+        <div className="studio-recovery-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <ClockCircleOutlined style={{ color: '#d97706', fontSize: '15px' }} />
+            <span>
+              Unsaved draft recovered from {moment(draftRecoveryAvailable.timestamp).format('MMM D, h:mm A')}. Would you like to restore it?
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={handleRestoreLocalDraft}
+              className="studio-recovery-btn is-restore"
+            >
+              Restore Changes
+            </button>
+            <button
+              type="button"
+              onClick={handleDismissLocalDraft}
+              className="studio-recovery-btn is-dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Studio Workspace */}
       <div className={`studio-workspace mode-${viewMode}`}>
@@ -618,20 +1001,44 @@ const BlogForm = () => {
                 })}
 
                 {mediaItems.length < 5 && (
-                  <Upload
-                    multiple
-                    accept="image/*"
-                    showUploadList={false}
-                    beforeUpload={handleAddImageFile}
-                  >
-                    <div className="studio-media-add">
-                      <PlusOutlined style={{ fontSize: '18px', color: '#111827' }} />
-                      <span>Add Image</span>
-                      <small>{5 - mediaItems.length} left</small>
-                    </div>
-                  </Upload>
+                  <>
+                    <Upload
+                      multiple
+                      accept="image/*"
+                      showUploadList={false}
+                      beforeUpload={handleAddImageFile}
+                    >
+                      <div className="studio-media-add">
+                        <PlusOutlined style={{ fontSize: '18px', color: '#111827' }} />
+                        <span>Add Image</span>
+                        <small>{5 - mediaItems.length} left</small>
+                      </div>
+                    </Upload>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsUnsplashModalOpen(true)}
+                      className="studio-media-add studio-media-unsplash"
+                      style={{
+                        border: '1.5px dashed #c7d2fe',
+                        background: '#f8faff',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <CameraOutlined style={{ fontSize: '18px', color: '#4f46e5' }} />
+                      <span style={{ color: '#4f46e5', fontWeight: 700 }}>Unsplash</span>
+                      <small style={{ color: '#6366f1' }}>Free Cover</small>
+                    </button>
+                  </>
                 )}
               </div>
+
+              {imageCredit && (
+                <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <CameraOutlined style={{ color: '#94a3b8' }} />
+                  <span>{imageCredit}</span>
+                </div>
+              )}
             </div>
 
             {/* Metadata Grid: Category, Read Time, Tags */}
@@ -824,6 +1231,69 @@ const BlogForm = () => {
                   )}
                 </div>
               )}
+            </div>
+
+            {/* Creator Economy & Commercial Disclosure Controls */}
+            <div className="studio-section-block">
+              <label className="studio-label">Commercial Disclosure & Digital Products</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div>
+                  <Checkbox
+                    checked={isSponsored}
+                    onChange={(e) => setIsSponsored(e.target.checked)}
+                  >
+                    This story includes sponsored content or brand partnership (FTC Disclosure)
+                  </Checkbox>
+                  {isSponsored && (
+                    <div style={{ marginTop: 8, paddingLeft: 24 }}>
+                      <Input
+                        placeholder="Sponsor or partner brand name (e.g. Google Cloud, Stripe, Vercel)"
+                        value={sponsorName}
+                        onChange={(e) => setSponsorName(e.target.value)}
+                        style={{ maxWidth: 420 }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <Checkbox
+                    checked={digitalProductEnabled}
+                    onChange={(e) => setDigitalProductEnabled(e.target.checked)}
+                  >
+                    Attach a digital resource / download (e.g. cheatsheet, template, starter kit)
+                  </Checkbox>
+                  {digitalProductEnabled && (
+                    <div style={{ marginTop: 8, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 500 }}>
+                      <Input
+                        placeholder="Digital asset title (e.g. Architecture Blueprint PDF)"
+                        value={digitalProductName}
+                        onChange={(e) => setDigitalProductName(e.target.value)}
+                      />
+                      <Input
+                        placeholder="Direct download or repository link (https://...)"
+                        value={digitalProductUrl}
+                        onChange={(e) => setDigitalProductUrl(e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 8 }}>
+                  <label className="studio-label" style={{ fontSize: 13, marginBottom: 6, display: 'block' }}>
+                    Story Access & Monetization
+                  </label>
+                  <Select
+                    value={accessLevel}
+                    onChange={(val) => setAccessLevel(val)}
+                    style={{ width: '100%', maxWidth: 360 }}
+                  >
+                    <Option value="public">🌐 Public (Free for all readers)</Option>
+                    <Option value="members">⭐ Members Only (Exclusive to BlogSum Members)</Option>
+                    <Option value="metered">⏱️ Metered (Counted against monthly quota)</Option>
+                  </Select>
+                </div>
+              </div>
             </div>
 
             {/* Rich Text Story Content Editor */}
@@ -1078,6 +1548,36 @@ const BlogForm = () => {
         )}
       </div>
 
+      {/* Phase 1 Modals & Drawers */}
+      <UnsplashModal
+        open={isUnsplashModalOpen}
+        onClose={() => setIsUnsplashModalOpen(false)}
+        onSelectImage={handleSelectUnsplashPhoto}
+      />
+
+      <RevisionDrawer
+        open={isRevisionDrawerOpen}
+        onClose={() => setIsRevisionDrawerOpen(false)}
+        revisions={revisions}
+        loading={loadingRevisions}
+        onRestoreRevision={handleRestoreRevision}
+        restoring={restoringRevision}
+      />
+
+      <AiCopilotDrawer
+        open={isAiCopilotOpen}
+        onClose={() => setIsAiCopilotOpen(false)}
+        title={title}
+        subtitle={subtitle}
+        content={content}
+        category={category}
+        tags={tags}
+        onApplyTitle={handleApplyAiTitle}
+        onApplySubtitle={handleApplyAiSubtitle}
+        onAddTag={handleAddAiTag}
+        onInsertTakeaways={handleInsertTakeaways}
+      />
+
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 
@@ -1087,6 +1587,127 @@ const BlogForm = () => {
           font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
           color: #111827;
           padding-bottom: 80px;
+        }
+
+        .studio-autosave-indicator {
+          display: flex;
+          align-items: center;
+        }
+        .studio-autosave-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px;
+          border-radius: 999px;
+          font-size: 11.5px;
+          font-weight: 600;
+          border: 1px solid transparent;
+        }
+        .studio-autosave-pill.is-saving {
+          background: #fef3c7;
+          color: #92400e;
+          border-color: #fde68a;
+        }
+        .studio-autosave-pill.is-saved {
+          background: #ecfdf5;
+          color: #065f46;
+          border-color: #a7f3d0;
+        }
+        .studio-autosave-pill.is-error {
+          background: #fef2f2;
+          color: #991b1b;
+          border-color: #fecaca;
+        }
+
+        .studio-recovery-banner {
+          max-width: 1440px;
+          width: 95%;
+          margin: 16px auto -12px;
+          padding: 12px 18px;
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          box-shadow: 0 2px 8px rgba(245, 158, 11, 0.08);
+        }
+        .studio-recovery-banner__info {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          color: #92400e;
+          font-size: 13px;
+        }
+        .studio-recovery-banner__actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .studio-recovery-btn {
+          padding: 5px 12px;
+          border-radius: 6px;
+          border: 1px solid #d97706;
+          background: #d97706;
+          color: #ffffff;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .studio-recovery-btn.is-dismiss {
+          background: transparent;
+          border-color: transparent;
+          color: #78350f;
+        }
+
+        .studio-tool-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          border-radius: 999px;
+          border: 1px solid #e5e7eb;
+          background: #ffffff;
+          color: #4b5563;
+          font-size: 12.5px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .studio-tool-btn:hover {
+          border-color: #4f46e5;
+          color: #4f46e5;
+          background: #f5f3ff;
+        }
+        .studio-tool-btn.is-copilot {
+          background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+          color: #ffffff;
+          border-color: transparent;
+          box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+        }
+        .studio-tool-btn.is-copilot:hover {
+          opacity: 0.95;
+          transform: translateY(-1px);
+        }
+
+        .studio-media-unsplash {
+          border-color: #818cf8 !important;
+          color: #4338ca !important;
+          background: #f5f3ff !important;
+        }
+
+        .ql-snow .ql-editor pre.ql-syntax {
+          background: #0f172a !important;
+          color: #e2e8f0 !important;
+          border-radius: 8px !important;
+          padding: 16px 20px !important;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+          font-size: 13.5px !important;
+          line-height: 1.6 !important;
+          margin: 16px 0 !important;
+          overflow-x: auto !important;
+        }
         }
         .studio-publishing-overlay {
           position: fixed;

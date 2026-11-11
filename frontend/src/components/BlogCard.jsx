@@ -21,6 +21,7 @@ import {
   StarFilled,
   CheckCircleFilled,
   MoreOutlined,
+  FolderAddOutlined,
 } from '@ant-design/icons';
 import moment from 'moment';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -34,6 +35,7 @@ import ReactionPicker, {
 } from './ReactionPicker';
 import AuthorHoverCard from './AuthorHoverCard';
 import CommentsDrawer, { getTotalCommentsCount } from './CommentsDrawer';
+import ReadingListModal from './ReadingListModal';
 
 const CATEGORY_COLORS = {
   Technology: { dot: '#38bdf8', pillBg: 'rgba(15, 23, 42, 0.78)', text: '#f8fafc' },
@@ -113,6 +115,7 @@ const BlogCard = ({ blog, onTagClick }) => {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [comments, setComments] = useState(blog.comments || []);
   const [shareOpen, setShareOpen] = useState(false);
+  const [readingListModalOpen, setReadingListModalOpen] = useState(false);
 
   // Sync card counts and status whenever cached blog data or user changes
   useEffect(() => {
@@ -584,37 +587,78 @@ const BlogCard = ({ blog, onTagClick }) => {
             <div className="modern-blog-card__image-overlay" />
           </Link>
 
-          {/* Frosted Category Pill */}
-          <div
-            className="modern-blog-card__category"
-            style={{
-              background: catStyle.pillBg,
-              color: catStyle.text,
-            }}
-          >
-            <span
-              className="modern-blog-card__category-dot"
-              style={{ backgroundColor: catStyle.dot }}
-            />
-            <span>{blog.category}</span>
+          {/* Frosted Category Pill & Members/Sponsored Badges */}
+          <div className="modern-blog-card__badges-group">
+            <div
+              className="modern-blog-card__category"
+              style={{
+                background: catStyle.pillBg,
+                color: catStyle.text,
+              }}
+            >
+              <span
+                className="modern-blog-card__category-dot"
+                style={{ backgroundColor: catStyle.dot }}
+              />
+              <span>{blog.category}</span>
+            </div>
+
+            {(blog.isMembersOnly || blog.accessLevel === 'members') && (
+              <div
+                className="modern-blog-card__members-badge"
+                title="Exclusive Story for BlogSum Members"
+              >
+                <StarFilled style={{ fontSize: '10px', color: '#fbbf24' }} />
+                <span>Members</span>
+              </div>
+            )}
+
+            {blog.isSponsored && (
+              <div
+                className="modern-blog-card__sponsored-badge"
+                title={`Sponsored Post${blog.sponsorName ? ` in partnership with ${blog.sponsorName}` : ''}`}
+              >
+                <span>Sponsored</span>
+              </div>
+            )}
           </div>
 
-          {/* Sleek Floating Bookmark Pill */}
-          <Tooltip title={bookmarked ? 'Saved in Bookmarks' : 'Save Article'}>
-            <button
-              type="button"
-              onClick={handleBookmarkClick}
-              className={`modern-blog-card__bookmark ${bookmarked ? 'is-bookmarked' : ''}`}
-              aria-label="Bookmark article"
-            >
-              {bookmarked ? (
-                <BookFilled style={{ fontSize: '15px', color: '#fbbf24' }} />
-              ) : (
-                <BookOutlined style={{ fontSize: '15px', color: '#ffffff' }} />
-              )}
-              <span>{bookmarkCount}</span>
-            </button>
-          </Tooltip>
+          {/* Sleek Floating Bookmark Pill & Reading List Shortcut */}
+          <div className="modern-blog-card__bookmark-group">
+            <Tooltip title={bookmarked ? 'Saved in Bookmarks' : 'Save Article'}>
+              <button
+                type="button"
+                onClick={handleBookmarkClick}
+                className={`modern-blog-card__bookmark ${bookmarked ? 'is-bookmarked' : ''}`}
+                aria-label="Bookmark article"
+              >
+                {bookmarked ? (
+                  <BookFilled style={{ fontSize: '14px', color: '#fbbf24' }} />
+                ) : (
+                  <BookOutlined style={{ fontSize: '14px', color: '#ffffff' }} />
+                )}
+                <span>{bookmarkCount}</span>
+              </button>
+            </Tooltip>
+
+            <Tooltip title="Add to Reading List...">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!user) {
+                    navigate('/login');
+                    return;
+                  }
+                  setReadingListModalOpen(true);
+                }}
+                className="modern-blog-card__bookmark-list-btn"
+                aria-label="Add to reading list"
+              >
+                <FolderAddOutlined style={{ fontSize: '13px' }} />
+              </button>
+            </Tooltip>
+          </div>
 
           {/* Scheduled / Draft Status Pill (for Author Profile view) */}
           {(isScheduledFuture || isDraft) && (
@@ -742,10 +786,12 @@ const BlogCard = ({ blog, onTagClick }) => {
                     className="modern-blog-card__author-name"
                     title={isAuthor ? 'You' : blog.author?.username || 'Author'}
                   >
-                    {isAuthor ? 'You' : blog.author?.username || 'Author'}
+                    <span className="modern-blog-card__author-name-text">
+                      {isAuthor ? 'You' : blog.author?.username || 'Author'}
+                    </span>
                     {blog.author?.isVerified && (
                       <CheckCircleFilled
-                        style={{ color: '#2563eb', fontSize: 12, marginLeft: 4 }}
+                        style={{ color: '#2563eb', fontSize: 11, marginLeft: 2, flexShrink: 0 }}
                         title="Verified Writer"
                       />
                     )}
@@ -906,6 +952,7 @@ const BlogCard = ({ blog, onTagClick }) => {
               onSelectReaction={(type) => performReactionUpdate(type)}
               onToggleDefault={() => performReactionUpdate(null)}
               size="small"
+              showLabel={false}
               className="modern-blog-card__footer-picker"
               buttonStyle={{
                 width: '100%',
@@ -969,6 +1016,15 @@ const BlogCard = ({ blog, onTagClick }) => {
         onCommentsUpdated={(updated) => setComments(updated)}
       />
 
+      {/* Reader Bookmarks & Reading List Modal */}
+      <ReadingListModal
+        open={readingListModalOpen}
+        onClose={() => setReadingListModalOpen(false)}
+        blogId={blog._id}
+        blogTitle={blog.title}
+        user={user}
+      />
+
       <style>{`
         .modern-blog-card {
           container-type: inline-size;
@@ -1025,10 +1081,18 @@ const BlogCard = ({ blog, onTagClick }) => {
           );
           pointer-events: none;
         }
-        .modern-blog-card__category {
+        .modern-blog-card__badges-group {
           position: absolute;
           top: 14px;
           left: 14px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+          z-index: 3;
+        }
+        .modern-blog-card__category {
+          position: static;
           display: inline-flex;
           align-items: center;
           gap: 7px;
@@ -1042,16 +1106,53 @@ const BlogCard = ({ blog, onTagClick }) => {
           border: 1px solid rgba(255, 255, 255, 0.18);
           box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
         }
+        .modern-blog-card__members-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 5px 10px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 700;
+          background: rgba(15, 23, 42, 0.85);
+          color: #fbbf24;
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(251, 191, 36, 0.45);
+          box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+        }
+        .modern-blog-card__sponsored-badge {
+          display: inline-flex;
+          align-items: center;
+          padding: 5px 9px;
+          border-radius: 999px;
+          font-size: 10.5px;
+          font-weight: 700;
+          background: rgba(15, 23, 42, 0.78);
+          color: #e2e8f0;
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
         .modern-blog-card__category-dot {
           width: 7px;
           height: 7px;
           border-radius: 50%;
           flex-shrink: 0;
         }
-        .modern-blog-card__bookmark {
+        .modern-blog-card__bookmark-group {
           position: absolute;
           top: 14px;
           right: 14px;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          z-index: 3;
+        }
+        .modern-blog-card__bookmark {
+          position: static;
           display: inline-flex;
           align-items: center;
           gap: 6px;
@@ -1076,6 +1177,28 @@ const BlogCard = ({ blog, onTagClick }) => {
           background: rgba(15, 23, 42, 0.88);
           border-color: rgba(251, 191, 36, 0.55);
           color: #fde68a;
+        }
+        .modern-blog-card__bookmark-list-btn {
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          background: rgba(15, 23, 42, 0.68);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          color: #ffffff;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+        }
+        .modern-blog-card__bookmark-list-btn:hover {
+          background: #4f46e5;
+          border-color: #818cf8;
+          color: #ffffff;
+          transform: translateY(-1px);
         }
         .modern-blog-card__schedule-badge {
           position: absolute;
@@ -1214,25 +1337,38 @@ const BlogCard = ({ blog, onTagClick }) => {
           gap: 8px;
           min-width: 0;
           flex: 1 1 auto;
+          overflow: hidden;
+        }
+        .modern-blog-card__avatar-wrap {
+          flex-shrink: 0;
+          display: inline-flex;
         }
         .modern-blog-card__author-text {
           display: flex;
           flex-direction: column;
           min-width: 0;
           flex: 1;
+          overflow: hidden;
         }
         .modern-blog-card__author-name {
           font-size: 13px;
           font-weight: 700;
           color: #0f172a;
           text-decoration: none;
+          line-height: 1.25;
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          max-width: 100%;
+          min-width: 0;
+        }
+        .modern-blog-card__author-name-text {
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          line-height: 1.25;
-          display: block;
+          min-width: 0;
         }
-        .modern-blog-card__author-name:hover {
+        .modern-blog-card__author-name:hover .modern-blog-card__author-name-text {
           color: #4f46e5;
         }
         .modern-blog-card__author-sub {
@@ -1252,8 +1388,9 @@ const BlogCard = ({ blog, onTagClick }) => {
         .modern-blog-card__follow-btn {
           display: inline-flex;
           align-items: center;
+          justify-content: center;
           gap: 4px;
-          padding: 4px 10px;
+          padding: 4px 8px;
           border-radius: 999px;
           font-size: 11.5px;
           font-weight: 700;
@@ -1263,6 +1400,8 @@ const BlogCard = ({ blog, onTagClick }) => {
           cursor: pointer;
           transition: all 0.18s ease;
           white-space: nowrap;
+          flex-shrink: 0;
+          min-height: 28px;
         }
         .modern-blog-card__follow-btn:hover {
           background: #4f46e5;
@@ -1274,14 +1413,18 @@ const BlogCard = ({ blog, onTagClick }) => {
           color: #475569;
           border-color: #cbd5e1;
         }
+        .modern-blog-card__follow-text {
+          display: none;
+        }
         .modern-blog-card__owner-btns {
           display: flex;
           align-items: center;
           gap: 4px;
+          flex-shrink: 0;
         }
         .modern-blog-card__icon-btn {
-          width: 30px;
-          height: 30px;
+          width: 28px;
+          height: 28px;
           border-radius: 8px;
           border: 1px solid #e2e8f0;
           background: #ffffff;
@@ -1289,7 +1432,7 @@ const BlogCard = ({ blog, onTagClick }) => {
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          font-size: 13px;
+          font-size: 12.5px;
           transition: all 0.18s ease;
           flex-shrink: 0;
         }
@@ -1381,10 +1524,11 @@ const BlogCard = ({ blog, onTagClick }) => {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 4px;
+          gap: 6px;
           padding-top: 6px;
           margin-top: auto;
           min-width: 0;
+          width: 100%;
         }
         .modern-blog-card__footer-picker {
           flex: 1 1 0;
@@ -1394,19 +1538,19 @@ const BlogCard = ({ blog, onTagClick }) => {
         .modern-blog-card__footer-picker .blog-reaction-trigger-btn {
           width: 100%;
           justify-content: center;
-          padding: 6px 8px !important;
+          padding: 6px 6px !important;
         }
         .modern-blog-card__action-btn {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          gap: 6px;
-          padding: 6px 8px;
+          gap: 5px;
+          padding: 6px 6px;
           border-radius: 999px;
           border: 1px solid transparent;
           background: transparent;
           color: #64748b;
-          font-size: 12.5px;
+          font-size: 12px;
           font-weight: 600;
           cursor: pointer;
           transition: all 0.18s ease;
@@ -1423,12 +1567,12 @@ const BlogCard = ({ blog, onTagClick }) => {
           background: rgba(5, 150, 105, 0.08);
         }
         .modern-blog-card__action-label {
-          display: inline;
+          display: none;
         }
         .modern-blog-card__action-count {
-          padding: 1px 7px;
+          padding: 1px 6px;
           border-radius: 999px;
-          font-size: 11.5px;
+          font-size: 11px;
           font-weight: 700;
           background: #f1f5f9;
           color: #475569;
@@ -1436,31 +1580,26 @@ const BlogCard = ({ blog, onTagClick }) => {
         }
 
         /* Container Queries based on the card's actual width */
-        @container blogcard (max-width: 340px) {
-          .modern-blog-card__action-label,
-          .modern-blog-card__footer .blog-reaction-label {
-            display: none !important;
+        @container blogcard (min-width: 480px) {
+          .modern-blog-card__action-label {
+            display: inline !important;
           }
-          .modern-blog-card__action-btn,
-          .modern-blog-card__footer .blog-reaction-trigger-btn {
-            padding: 5px 6px !important;
-            gap: 4px !important;
-            font-size: 12px !important;
-          }
-          .modern-blog-card__action-count,
-          .modern-blog-card__footer .blog-reaction-count {
-            padding: 1px 5px !important;
-            font-size: 11px !important;
-          }
-          .modern-blog-card__follow-text {
-            display: none !important;
-          }
-          .modern-blog-card__follow-btn {
-            padding: 4px 7px !important;
+          .modern-blog-card__action-btn {
+            gap: 6px !important;
+            padding: 6px 10px !important;
           }
         }
 
-        @container blogcard (max-width: 280px) {
+        @container blogcard (min-width: 440px) {
+          .modern-blog-card__follow-text {
+            display: inline !important;
+          }
+          .modern-blog-card__follow-btn {
+            padding: 4px 10px !important;
+          }
+        }
+
+        @container blogcard (max-width: 320px) {
           .modern-blog-card__author-sub {
             display: none !important;
           }
@@ -1468,25 +1607,19 @@ const BlogCard = ({ blog, onTagClick }) => {
           .modern-blog-card__footer .blog-reaction-trigger-btn {
             padding: 5px 4px !important;
             gap: 2px !important;
+            font-size: 11.5px !important;
+          }
+          .modern-blog-card__action-count,
+          .modern-blog-card__footer .blog-reaction-count {
+            padding: 1px 4px !important;
+            font-size: 10.5px !important;
           }
         }
 
-        /* Fallback Media Query for screens where 4 columns are displayed at 1200px-1440px */
-        @media (min-width: 1200px) and (max-width: 1440px) {
-          .modern-blog-card__action-label,
-          .modern-blog-card__footer .blog-reaction-label {
+        /* Fallback for ultra-dense screen layouts */
+        @media (max-width: 768px) {
+          .modern-blog-card__action-label {
             display: none;
-          }
-          .modern-blog-card__action-btn,
-          .modern-blog-card__footer .blog-reaction-trigger-btn {
-            padding: 5px 6px !important;
-            gap: 4px !important;
-          }
-          .modern-blog-card__follow-text {
-            display: none;
-          }
-          .modern-blog-card__follow-btn {
-            padding: 4px 7px !important;
           }
         }
       `}</style>

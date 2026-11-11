@@ -22,37 +22,40 @@ const AuthorHoverCard = ({ author, isFollowing: propIsFollowing, onFollowChange,
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const authorId = author?._id || author;
-  const isSelf = Boolean(user && authorId && String(user._id) === String(authorId));
+  const authorId = typeof author === 'string' ? author : (author?._id || author?.username);
+  const isSelf = Boolean(
+    user && authorId &&
+    (String(user._id) === String(authorId) || String(user.username || '').toLowerCase() === String(authorId).toLowerCase())
+  );
 
   const { data: profileData } = useQuery({
     queryKey: ['authorPreview', authorId],
     queryFn: async () => {
-      const response = await axiosInstance.get(`/api/users/public-profile/${authorId}`);
+      const response = await axiosInstance.get(`/api/users/public-profile/${encodeURIComponent(authorId)}`);
       return response.data;
     },
-    enabled: Boolean(open && authorId && typeof authorId === 'string'),
+    enabled: Boolean(open && authorId),
     staleTime: 2 * 60 * 1000,
   });
 
+  const effectiveUserId = profileData?._id || authorId;
+
   const { data: queriedFollowing = false } = useQuery({
-    queryKey: ['followState', authorId],
+    queryKey: ['followState', effectiveUserId],
     queryFn: async () => {
-      const response = await axiosInstance.get(`/api/users/${authorId}/follow-state`, {
-        headers: { Authorization: `Bearer ${user.token}` },
-      });
+      const response = await axiosInstance.get(`/api/users/${encodeURIComponent(effectiveUserId)}/follow-state`);
       return Boolean(response.data.isFollowing);
     },
-    enabled: Boolean(open && user?.token && authorId && !isSelf && propIsFollowing === undefined),
+    enabled: Boolean(open && user && effectiveUserId && !isSelf && propIsFollowing === undefined),
     staleTime: 2 * 60 * 1000,
   });
 
   const isFollowing = propIsFollowing !== undefined ? propIsFollowing : queriedFollowing;
 
-  const displayUsername = profileData?.username || author?.username || 'Author';
-  const displayAvatar = profileData?.profilePicture || author?.profilePicture;
-  const displayEmail = profileData?.email || author?.email || '';
-  const displayLocation = profileData?.location || author?.location || '';
+  const displayUsername = profileData?.username || (typeof author === 'string' ? author : author?.username) || 'Author';
+  const displayAvatar = profileData?.profilePicture || (typeof author === 'object' ? author?.profilePicture : '');
+  const displayEmail = profileData?.email || (typeof author === 'object' ? author?.email : '') || '';
+  const displayLocation = profileData?.location || (typeof author === 'object' ? author?.location : '') || '';
   const followersCount =
     profileData?.followersCount ??
     (Array.isArray(author?.followers) ? author.followers.length : 0);
@@ -73,14 +76,13 @@ const AuthorHoverCard = ({ author, isFollowing: propIsFollowing, onFollowChange,
     }
     setFollowLoading(true);
     try {
+      const targetFollowId = profileData?._id || authorId;
       const endpoint = isFollowing
-        ? `/api/users/${authorId}/unfollow`
-        : `/api/users/${authorId}/follow`;
-      await axiosInstance.put(endpoint, null, {
-        headers: { Authorization: `Bearer ${user.token}` },
-      });
+        ? `/api/users/${encodeURIComponent(targetFollowId)}/unfollow`
+        : `/api/users/${encodeURIComponent(targetFollowId)}/follow`;
+      await axiosInstance.put(endpoint);
       const nextState = !isFollowing;
-      queryClient.setQueryData(['followState', authorId], nextState);
+      queryClient.setQueryData(['followState', effectiveUserId], nextState);
       queryClient.invalidateQueries({ queryKey: ['authorPreview', authorId] });
       if (onFollowChange) onFollowChange(nextState);
       message.success(
@@ -350,6 +352,47 @@ const AuthorHoverCard = ({ author, isFollowing: propIsFollowing, onFollowChange,
           </div>
         </div>
 
+        {/* Creator Achievement Badges */}
+        {profileData?.badges && profileData.badges.length > 0 && (
+          <div style={{ marginTop: '12px' }}>
+            <div
+              style={{
+                fontSize: '10.5px',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                color: '#94a3b8',
+                marginBottom: '6px',
+              }}
+            >
+              Achievements & Badges
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+              {profileData.badges.map((b) => (
+                <span
+                  key={b.key}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '2px 8px',
+                    borderRadius: '999px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: b.color,
+                    background: b.bg,
+                    border: `1px solid ${b.color}22`,
+                  }}
+                  title={b.description}
+                >
+                  <span>✦</span>
+                  <span>{b.label}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Recent Articles Preview */}
         {recentBlogs.length > 0 && (
           <div style={{ marginTop: '12px' }}>
@@ -444,7 +487,7 @@ const AuthorHoverCard = ({ author, isFollowing: propIsFollowing, onFollowChange,
           '0 20px 40px -10px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(226, 232, 240, 0.9)',
       }}
     >
-      <span style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', minWidth: 0, maxWidth: '100%' }}>
         {children}
       </span>
     </Popover>
