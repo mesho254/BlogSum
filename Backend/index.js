@@ -41,10 +41,17 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   'http://127.0.0.1:5173',
   'https://blog-sum.vercel.app',
+  'https://blog-sum-gamma.vercel.app',
 ];
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || process.env.CLIENT_URL === origin) {
+    if (!origin) return callback(null, true);
+    const normalized = origin.replace(/\/$/, '');
+    if (
+      allowedOrigins.includes(normalized) ||
+      (process.env.CLIENT_URL && process.env.CLIENT_URL.replace(/\/$/, '') === normalized) ||
+      /https:\/\/blog-sum(-[a-z0-9]+)?\.vercel\.app$/.test(normalized)
+    ) {
       callback(null, true);
     } else {
       callback(null, true); // Permissive in dev, credentials safely bound
@@ -59,9 +66,16 @@ const corsOptions = {
 const { Server } = require("socket.io");
 const io = new Server(server, {
   cors: {
-    origin: ["https://blog-sum.vercel.app", "http://localhost:3000", "http://localhost:5173"],
-    methods: ["GET", "POST"],
-    allowedHeaders: ["my-custom-header"],
+    origin: [
+      "https://blog-sum.vercel.app",
+      "https://blog-sum-gamma.vercel.app",
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "http://127.0.0.1:3000",
+      "http://127.0.0.1:5173",
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization", "my-custom-header"],
     credentials: true,
   }
 });
